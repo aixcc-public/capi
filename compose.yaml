@@ -1,0 +1,57 @@
+---
+services:
+  dind:
+    image: docker:24-dind
+    command: ["dockerd", "-H", "tcp://0.0.0.0:2376", "--tls=false", "--storage-driver=overlay2"]
+    restart: always
+    privileged: true
+    ports:
+      - "2376:2376"
+    volumes:
+      - "shared-tmp:/tmp"
+    environment:
+      - DOCKER_TLS_CERTDIR # intentionally blank to optimize runtime
+  postgres:
+    image: "postgres:16"
+    # this makes postgres log queries
+    # command: ["postgres", "-c", "log_statement=all"]
+    ports:
+      - 5432
+    environment:
+      - POSTGRES_PASSWORD=secret
+      - POSTGRES_USER=capi
+      - POSTGRES_DB=capi
+  capi:
+    build:
+      context: .
+    tty: true
+    restart: always
+    ports:
+      - "8082:80"
+    volumes:
+      - "shared-tmp:/tmp"
+    configs:
+      - source: capi
+        target: /etc/capi/config.yaml
+    environment:
+      - DOCKER_HOST=tcp://dind:2376
+      - CAPI_DATABASE_PASSWORD=secret
+      - CAPI_DATABASE_USERNAME=capi
+      - CAPI_DATABASE_NAME=capi
+      - CAPI_DATABASE_HOST=postgres
+      - CAPI_DATABASE_PORT=5432
+      - WEB_CONCURRENCY=$WEB_CONCURRENCY
+    env_file:
+      - path: ./env
+        required: true
+volumes:
+  shared-tmp:
+configs:
+  capi:
+    content: |
+      auth:
+        preload:
+          00000000-0000-0000-0000-000000000000: secret
+      cp_targets:
+        mock-cp:
+          url: "https://github.com/aixcc-sc/mock-cp.git"
