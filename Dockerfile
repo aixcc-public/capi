@@ -64,8 +64,10 @@ ENV PYTHONDONTWRITEBYTECODE 1 # disables pyc files
 # disables buffering stdout and stderr
 ENV PYTHONUNBUFFERED 1
 
+ENV CAPI_PORT 8080
+
 HEALTHCHECK --interval=5s --retries=5 --start-period=3s --timeout=5s \
-    CMD curl --fail http://localhost || exit 1
+    CMD curl --fail http://localhost:${CAPI_PORT} || exit 1
 
 EXPOSE 80/tcp
 
