@@ -11,10 +11,12 @@ sec:
 	poetry run safety check $(MODULES)
 
 lint:
-	poetry run pylint $(MODULES)
-	poetry run black --check $(MODULES)
-	poetry run isort --check $(MODULES)
-	poetry run mypy $(MODULES)
+	RC=0; \
+	poetry run pylint $(MODULES) || RC=1; \
+	poetry run black --check $(MODULES) || RC=1; \
+	poetry run isort --check $(MODULES) || RC=1; \
+	poetry run mypy $(MODULES) || RC=1; \
+	exit $$RC
 
 build:
 	@docker build . -t capi

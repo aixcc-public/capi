@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from aiopg.sa import SAConnection
 from fastapi import APIRouter, Depends
 from structlog.stdlib import get_logger
@@ -18,7 +20,7 @@ LOGGER = get_logger(__name__)
 async def upload_gp(
     gp: GPSubmission,
     db: SAConnection = Depends(fastapi_get_db),
-    team_id: str = Depends(get_token_id),
+    team_id: UUID = Depends(get_token_id),
 ) -> GPResponse:
     return await process_gp_upload(gp, db, team_id)
 
@@ -27,6 +29,6 @@ async def upload_gp(
 async def check_gp(
     gp_uuid: UUIDPathParameter,
     db: SAConnection = Depends(fastapi_get_db),
-    team_id: str = Depends(get_token_id),
+    team_id: UUID = Depends(get_token_id),
 ) -> GPStatusResponse:
     return await get_gp_status(gp_uuid, db, team_id)

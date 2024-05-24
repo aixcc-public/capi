@@ -1,5 +1,6 @@
 import asyncio
 from typing import Any
+from uuid import UUID
 
 from aiopg.sa import SAConnection
 from fastapi import Depends, HTTPException, status
@@ -7,6 +8,7 @@ from sqlalchemy import insert, select
 from structlog.stdlib import get_logger
 from vyper import v
 
+from competition_api.audit import Auditor
 from competition_api.db import GeneratedPatch, VulnerabilityDiscovery, fastapi_get_db
 from competition_api.endpoints.lib.auth import get_token_id
 from competition_api.models import GPResponse, GPStatusResponse, GPSubmission
@@ -17,8 +19,10 @@ LOGGER = get_logger(__name__)
 
 
 async def process_gp_upload(
-    gp: GPSubmission, db: SAConnection, team_id: str
+    gp: GPSubmission, db: SAConnection, team_id: UUID
 ) -> GPResponse:
+    auditor = Auditor(team_id)
+
     if v.get_bool("mock_mode"):
         return GPResponse(
             status=FeedbackStatus.ACCEPTED,
@@ -66,7 +70,7 @@ async def process_gp_upload(
     )
     cp_name = await cp_name.fetchone()
 
-    asyncio.create_task(TaskRunner(cp_name.cp_name).test_gp(gp_row, vds_row))
+    asyncio.create_task(TaskRunner(cp_name.cp_name, auditor).test_gp(gp_row, vds_row))
 
     return GPResponse(
         status=gp_row.status,
@@ -78,7 +82,7 @@ async def process_gp_upload(
 async def get_gp_status(
     gp_uuid: UUIDPathParameter,
     db: SAConnection = Depends(fastapi_get_db),
-    team_id: str = Depends(get_token_id),
+    team_id: UUID = Depends(get_token_id),
 ) -> GPStatusResponse:
     if v.get_bool("mock_mode"):
         return GPStatusResponse(status=FeedbackStatus.ACCEPTED, gp_uuid=gp_uuid)

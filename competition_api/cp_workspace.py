@@ -40,6 +40,7 @@ class CPWorkspace:
         self._repo_url = git_repo_url
 
         self.repo = Repo.clone_from(self._repo_url, self.workdir)
+        self.src_repo: Repo | None = None
 
         self.project_yaml = YAML.load(self.workdir / "project.yaml")
 
@@ -51,7 +52,19 @@ class CPWorkspace:
     def __del__(self):
         shutil.rmtree(self.workdir)
 
+    def sanitizer(self, sanitizer_id: str) -> str | None:
+        return self.project_yaml.get("sanitizers", {}).get(sanitizer_id)
+
+    def harness(self, harness_id: str) -> str | None:
+        return self.project_yaml.get("harnesses", {}).get(harness_id, {}).get("name")
+
+    def current_commit(self) -> str:
+        if self.src_repo is None:
+            raise NotImplementedError
+        return self.src_repo.head.commit.hexsha
+
     async def setup(self):
+        await LOGGER.adebug("Workspace: setup")
         await run(
             "docker",
             "login",
@@ -63,11 +76,23 @@ class CPWorkspace:
         )
         await run("docker", "pull", self.project_yaml["docker_image"])
         await run("make", "cpsrc-prepare", cwd=self.workdir)
+        self.src_repo = Repo(self.workdir / "src" / "samples")
 
     def checkout(self, ref: str):
-        self.repo.git.checkout(ref)
+        LOGGER.debug("Workspace: checkout %s", ref)
+
+        if self.src_repo is None:
+            raise NotImplementedError
+
+        self.src_repo.git.checkout(ref)
+
+        LOGGER.debug("Checked out %s", self.current_commit())
 
     async def build(self, patch: bytes | None = None) -> bool:
+        await LOGGER.adebug(
+            "Workspace: build"
+            + (f" with patch {patch.decode('utf8')}" if patch else "")
+        )
         with open(self.workdir / ".env.project", "w+", encoding="utf8") as env:
             env.write(
                 f'DOCKER_VOL_ARGS="-v {self.workdir}/work:/work '
@@ -106,6 +131,11 @@ class CPWorkspace:
         )
 
     async def check_sanitizers(self, blob: bytes, harness: str) -> set[str]:
+        await LOGGER.adebug(
+            "Workspace: check sanitizers on harness %s with blob (size %s)",
+            harness,
+            len(blob),
+        )
         with tempfile.NamedTemporaryFile(
             delete_on_close=False, dir=v.get("tempdir")
         ) as blobfile:
@@ -116,7 +146,7 @@ class CPWorkspace:
                 "./run.sh",
                 "run_pov",
                 blobfile.name,
-                self.project_yaml.get("harnesses", {}).get(harness, {}).get("name"),
+                self.harness(harness),
                 cwd=self.workdir,
                 env=self.run_env,
             )
@@ -147,6 +177,7 @@ class CPWorkspace:
             return triggered
 
     async def run_functional_tests(self) -> bool:
+        await LOGGER.adebug("Workspace: run tests")
         return_code, _, _ = await run(
             "./run.sh", "run_tests", cwd=self.workdir, env=self.run_env
         )

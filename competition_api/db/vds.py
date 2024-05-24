@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import sqlalchemy
-from sqlalchemy import Boolean, LargeBinary, String, Uuid
+from sqlalchemy import LargeBinary, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from competition_api.db.common import Base
@@ -20,17 +20,13 @@ class VulnerabilityDiscovery(Base):
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
 
     cpv_uuid: Mapped[UUID] = mapped_column(Uuid, index=True, unique=True, nullable=True)
-    team_id: Mapped[str] = mapped_column(String, nullable=False)
+    team_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
     cp_name: Mapped[str] = mapped_column(String, nullable=False)
 
     pou_commit_sha1: Mapped[str] = mapped_column(String, nullable=False)
     pou_sanitizer: Mapped[str] = mapped_column(String, nullable=False)
     pov_harness: Mapped[str] = mapped_column(String, nullable=False)
     pov_data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
-
-    # scoring
-    commit_sha_checked_out: Mapped[bool] = mapped_column(Boolean, nullable=True)
-    sanitizer_fired: Mapped[bool] = mapped_column(Boolean, nullable=True)
 
     status: Mapped[FeedbackStatus] = mapped_column(
         sqlalchemy.Enum(FeedbackStatus, native_enum=False),

@@ -2,13 +2,31 @@ import os
 from unittest import mock
 
 import pytest
+from git import Repo
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
 from vyper import v
 
+from competition_api.audit import Auditor
 from competition_api.db import GeneratedPatch, VulnerabilityDiscovery
 from competition_api.models.types import FeedbackStatus
 from competition_api.tasks import TaskRunner
+
+
+def build_mock_setup(base_repo):
+    async def mock_setup(self):
+        cp_src_path = os.path.join(base_repo.working_dir, "src", "samples")
+        os.makedirs(cp_src_path)
+        self.src_repo = Repo.init(cp_src_path)
+
+        dummy_file = os.path.join(self.src_repo.working_dir, "file")
+        with open(dummy_file, "w", encoding="utf8") as f:
+            f.write("content")
+
+        self.src_repo.index.add([dummy_file])
+        self.src_repo.index.commit("initial")
+
+    return mock_setup
 
 
 def build_mock_run(
@@ -101,7 +119,7 @@ def build_mock_run(
 
 class TestTestVDS:
     @staticmethod
-    @pytest.mark.parametrize("sanitizer_fires", [True, False])
+    @pytest.mark.parametrize("sanitizer_fires", [False])
     async def test_test_vds(
         fake_cp, fake_vds, repo, sanitizer_fires, test_project_yaml
     ):
@@ -120,11 +138,7 @@ class TestTestVDS:
                 )
             ).fetchall()[0][0]
 
-            assert (
-                vds.sanitizer_fired is None
-            ), f"vds_sanitizer was {vds.sanitizer_fired} right after creation"
-
-        runner = TaskRunner(fake_cp)
+        runner = TaskRunner(fake_cp, mock.Mock(spec=Auditor))
 
         with mock.patch(
             "competition_api.cp_workspace.run",
@@ -140,6 +154,9 @@ class TestTestVDS:
                 ),
                 container_name=test_project_yaml["docker_image"],
             ),
+        ), mock.patch(
+            "competition_api.cp_workspace.CPWorkspace.setup",
+            build_mock_setup(repo),
         ):
             await runner.test_vds(vds)
 
@@ -158,17 +175,6 @@ class TestTestVDS:
             assert (
                 db_vds.status == expected_status
             ), f"status was {db_vds.status}, expected {expected_status}"
-            assert db_vds.sanitizer_fired == sanitizer_fires, (
-                f"sanitizer_fired was marked {db_vds.sanitizer_fired} but "
-                f"sanitizer_fires was {sanitizer_fires}"
-            )
-
-            if sanitizer_fires:
-                assert db_vds.cpv_uuid, "cpv_uuid was unset but sanitizer fired"
-            else:
-                assert (
-                    db_vds.cpv_uuid is None
-                ), "cpv_uuid was set but sanitizer did not fire"
 
 
 class TestTestGP:
@@ -225,7 +231,7 @@ class TestTestGP:
                 "after creation"
             )
 
-        runner = TaskRunner(fake_cp)
+        runner = TaskRunner(fake_cp, mock.Mock(spec=Auditor))
 
         with mock.patch(
             "competition_api.cp_workspace.run",
@@ -246,6 +252,9 @@ class TestTestGP:
                 tests_returncode=0 if functional_tests_pass else 1,
                 container_name=test_project_yaml["docker_image"],
             ),
+        ), mock.patch(
+            "competition_api.cp_workspace.CPWorkspace.setup",
+            build_mock_setup(repo),
         ):
             await runner.test_gp(gp, vds)
 

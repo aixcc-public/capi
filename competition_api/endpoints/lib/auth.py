@@ -1,4 +1,5 @@
 from typing import Annotated
+from uuid import UUID
 
 from aiopg.sa import SAConnection
 from fastapi import Depends, HTTPException, status
@@ -15,8 +16,13 @@ LOGGER = get_logger(__name__)
 async def get_token_id(
     credentials: Annotated[HTTPBasicCredentials, Depends(auth)],
     db: SAConnection = Depends(fastapi_get_db),
-) -> str:
-    authenticated = await Token.verify(db, credentials.username, credentials.password)
+) -> UUID:
+    try:
+        token_id = UUID(credentials.username)
+        token = credentials.password
+        authenticated = await Token.verify(db, token_id, token)
+    except ValueError:
+        authenticated = False
 
     if not authenticated:
         raise HTTPException(
@@ -24,4 +30,5 @@ async def get_token_id(
             detail="Bad credentials",
             headers={"WWW-Authenticate": "Basic"},
         )
-    return credentials.username
+
+    return token_id

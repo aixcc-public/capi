@@ -30,6 +30,7 @@ services:
       - "8082:8080"
     volumes:
       - "shared-tmp:/tmp"
+      - "./capi-logs:/var/log/capi"
     configs:
       - source: capi
         target: /etc/capi/config.yaml

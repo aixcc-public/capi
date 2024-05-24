@@ -54,7 +54,7 @@ class Token(Base):
         return token_id, token
 
     @classmethod
-    async def verify(cls, db: SAConnection, token_id: str, token: str) -> bool:
+    async def verify(cls, db: SAConnection, token_id: UUID, token: str) -> bool:
         await LOGGER.adebug("Verifying token for %s", token_id)
 
         result = await db.execute(select(cls.token).where(cls.id == token_id))

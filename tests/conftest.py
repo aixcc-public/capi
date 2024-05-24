@@ -46,10 +46,12 @@ def test_project_yaml():
 @pytest.fixture
 def repo(test_project_yaml):
     with tempfile.TemporaryDirectory(dir=v.get("tempdir")) as repo_dir:
+        repo_dir = pathlib.Path(repo_dir)
+
         project = "project.yaml"
         repo = Repo.init(repo_dir)
 
-        YAML.dump(test_project_yaml, pathlib.Path(repo_dir) / project)
+        YAML.dump(test_project_yaml, repo_dir / project)
         repo.index.add([project])
         repo.index.commit("initial")
 
@@ -101,6 +103,16 @@ def db(db_config):  # pylint: disable=unused-argument
     engine = create_engine(v.get("database.url"))
     with sessionmaker(engine)() as session:
         yield session
+
+
+@pytest.fixture(autouse=True)
+def audit_sink():
+    with tempfile.NamedTemporaryFile(delete_on_close=False) as auditfile:
+        auditfile.close()
+
+        v.set("audit.file", auditfile.name)
+
+        yield
 
 
 @pytest.fixture

@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from aiopg.sa import SAConnection
 from fastapi import APIRouter, Depends
 from structlog.stdlib import get_logger
@@ -18,7 +20,7 @@ LOGGER = get_logger(__name__)
 async def upload_vd(
     vds: VDSubmission,
     db: SAConnection = Depends(fastapi_get_db),
-    team_id: str = Depends(get_token_id),
+    team_id: UUID = Depends(get_token_id),
 ) -> VDSResponse:
     return await process_vd_upload(vds, db, team_id)
 
@@ -27,6 +29,6 @@ async def upload_vd(
 async def check_vd(
     vd_uuid: UUIDPathParameter,
     db: SAConnection = Depends(fastapi_get_db),
-    team_id: str = Depends(get_token_id),
+    team_id: UUID = Depends(get_token_id),
 ) -> VDSStatusResponse:
     return await get_vd_status(vd_uuid, db, team_id)
