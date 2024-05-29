@@ -25,16 +25,22 @@ run: build
 	docker run -it capi
 
 test:
-	poetry run pytest ${TESTS}
+	poetry run pytest --cov=competition_api --cov-report term-missing:skip-covered ${TESTS}
 
-up:
-	docker-compose build && WEB_CONCURRENCY=4 docker-compose up
+compose-build:
+	docker-compose build
+
+up: compose-build
+	WEB_CONCURRENCY=4 docker-compose up
 
 down:
 	docker-compose down
 
 clean:
-	docker-compose rm -v
+	docker-compose down -v
 
-demo:
-	cd demo && ./run.sh
+e2e: compose-build
+	:>capi-logs/audit.log
+	WEB_CONCURRENCY=4 docker-compose up -d
+	cd e2e && ./run.sh; docker-compose down
+	cat capi-logs/audit.log

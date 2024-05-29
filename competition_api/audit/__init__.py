@@ -1,3 +1,3 @@
-from .audit import Auditor
+from .audit import Auditor, get_auditor
 
-__all__ = ["Auditor"]
+__all__ = ["get_auditor", "Auditor"]

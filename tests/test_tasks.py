@@ -1,46 +1,59 @@
+# pylint: disable=too-many-arguments,too-many-locals,too-many-return-statements,unused-argument
+
 import os
+from typing import Iterator
 from unittest import mock
 
 import pytest
 from git import Repo
-from sqlalchemy import create_engine, select, update
+from sqlalchemy import create_engine, insert, select, update
 from sqlalchemy.orm import sessionmaker
 from vyper import v
 
-from competition_api.audit import Auditor
+from competition_api.audit.types import (
+    EventType,
+    GPSubmissionFailReason,
+    VDSubmissionFailReason,
+)
 from competition_api.db import GeneratedPatch, VulnerabilityDiscovery
 from competition_api.models.types import FeedbackStatus
 from competition_api.tasks import TaskRunner
 
+from .lib.auditor import RecordingAuditor
+
 
 def build_mock_setup(base_repo):
+    cp_src_path = os.path.join(base_repo.working_dir, "src", "samples")
+    os.makedirs(cp_src_path, exist_ok=True)
+    src_repo = Repo.init(cp_src_path)
+    dummy_file = os.path.join(src_repo.working_dir, "file")
+
+    latest = src_repo.git.head
+    for content in ["content", "more content"]:
+        with open(dummy_file, "a", encoding="utf8") as f:
+            f.write(content)
+
+        src_repo.index.add([dummy_file])
+        latest = src_repo.index.commit("initial")
+
+    src_repo.create_head("main", latest)
+
     async def mock_setup(self):
-        cp_src_path = os.path.join(base_repo.working_dir, "src", "samples")
-        os.makedirs(cp_src_path)
-        self.src_repo = Repo.init(cp_src_path)
+        self.src_repo = src_repo
 
-        dummy_file = os.path.join(self.src_repo.working_dir, "file")
-        with open(dummy_file, "w", encoding="utf8") as f:
-            f.write("content")
-
-        self.src_repo.index.add([dummy_file])
-        self.src_repo.index.commit("initial")
-
-    return mock_setup
+    return mock_setup, src_repo
 
 
 def build_mock_run(
     pov_blob,
     pov_harness,
     gp_patch=None,
-    sanitizer=None,
+    sanitizer: Iterator | None = None,
     patch_returncode=0,
     tests_returncode=0,
     container_name="",
-):  # pylint: disable=too-many-arguments,too-many-return-statements
-    def mock_run(
-        func, *args, cwd=None, stdin=None, env=None
-    ):  # pylint: disable=unused-argument
+):
+    def mock_run(func, *args, cwd=None, stdin=None, env=None):
         if func == "./run.sh":
             if args[0] == "build":
                 if gp_patch:
@@ -70,10 +83,11 @@ def build_mock_run(
                     harness == pov_harness
                 ), f"harness was {harness}, expected {pov_harness}"
 
+                assert cwd
                 output_dir = os.path.join(
                     cwd, "out", "output", "some-timestamp-run_pov"
                 )
-                os.makedirs(output_dir)
+                os.makedirs(output_dir, exist_ok=True)
 
                 with open(
                     os.path.join(output_dir, "stdout.log"), "w", encoding="utf8"
@@ -83,7 +97,7 @@ def build_mock_run(
                 with open(
                     os.path.join(output_dir, "stderr.log"), "w", encoding="utf8"
                 ) as stderr_file:
-                    stderr_file.write(sanitizer if sanitizer else "")
+                    stderr_file.write(next(sanitizer) if sanitizer else "")
 
                 return (0, "".encode("utf8"), "".encode("utf8"))
 
@@ -119,76 +133,218 @@ def build_mock_run(
 
 class TestTestVDS:
     @staticmethod
-    @pytest.mark.parametrize("sanitizer_fires", [False])
+    @pytest.mark.parametrize(
+        "expected_event_type,fail_reason,sanitizer_fires",
+        [
+            (
+                EventType.VD_SUBMISSION_FAIL,
+                [VDSubmissionFailReason.SANITIZER_FIRED_BEFORE_COMMIT],
+                [True, True, True],
+            ),
+            (EventType.VD_SUBMISSION_SUCCESS, None, [True, True, False]),
+            (
+                EventType.VD_SUBMISSION_FAIL,
+                [VDSubmissionFailReason.SANITIZER_DID_NOT_FIRE_AT_COMMIT],
+                [True, False, False],
+            ),
+            (
+                EventType.VD_SUBMISSION_FAIL,
+                [VDSubmissionFailReason.SANITIZER_DID_NOT_FIRE_AT_HEAD],
+                [False, True, False],
+            ),
+            (
+                EventType.VD_SUBMISSION_FAIL,
+                [
+                    VDSubmissionFailReason.SANITIZER_DID_NOT_FIRE_AT_HEAD,
+                    VDSubmissionFailReason.SANITIZER_DID_NOT_FIRE_AT_COMMIT,
+                    VDSubmissionFailReason.SANITIZER_FIRED_BEFORE_COMMIT,
+                ],
+                [False, False, True],
+            ),
+            (
+                EventType.VD_SUBMISSION_FAIL,
+                [
+                    VDSubmissionFailReason.SANITIZER_DID_NOT_FIRE_AT_HEAD,
+                    VDSubmissionFailReason.SANITIZER_FIRED_BEFORE_COMMIT,
+                ],
+                [False, True, True],
+            ),
+            (
+                EventType.VD_SUBMISSION_FAIL,
+                [
+                    VDSubmissionFailReason.SANITIZER_DID_NOT_FIRE_AT_COMMIT,
+                    VDSubmissionFailReason.SANITIZER_FIRED_BEFORE_COMMIT,
+                ],
+                [True, False, True],
+            ),
+            (
+                EventType.VD_SUBMISSION_FAIL,
+                [
+                    VDSubmissionFailReason.SANITIZER_DID_NOT_FIRE_AT_HEAD,
+                    VDSubmissionFailReason.SANITIZER_DID_NOT_FIRE_AT_COMMIT,
+                ],
+                [False, False, False],
+            ),
+        ],
+    )
     async def test_test_vds(
-        fake_cp, fake_vds, repo, sanitizer_fires, test_project_yaml
+        fake_vds,
+        fake_cp,
+        creds,
+        test_project_yaml,
+        repo,
+        expected_event_type,
+        fail_reason,
+        sanitizer_fires,
     ):
         engine = create_engine(v.get("database.url"))
-        with sessionmaker(engine)() as db:
+        setup, src_repo = build_mock_setup(repo)
+        with sessionmaker(engine, expire_on_commit=False)() as db:
             # make sure the commit sha we want to check out is in the repo
             db.execute(
                 update(VulnerabilityDiscovery)
                 .where(VulnerabilityDiscovery.id == fake_vds["id"])
-                .values(pou_commit_sha1=repo.head.commit.hexsha)
+                .values(pou_commit_sha1=src_repo.head.commit.hexsha)
             )
-
             vds = db.execute(
                 select(VulnerabilityDiscovery).where(
                     VulnerabilityDiscovery.id == fake_vds["id"]
                 )
-            ).fetchall()[0][0]
+            ).fetchone()[0]
 
-        runner = TaskRunner(fake_cp, mock.Mock(spec=Auditor))
+            db.commit()
+
+        auditor = RecordingAuditor(creds[0])
+        auditor.push_context(vd_uuid=fake_vds["id"], cp_name=fake_vds["cp_name"])
+        runner = TaskRunner(fake_cp, auditor)
+
+        san = runner.workspace.project_yaml["sanitizers"][fake_vds["pou_sanitizer"]]
 
         with mock.patch(
+            "competition_api.cp_workspace.CPWorkspace.setup",
+            setup,
+        ), mock.patch(
             "competition_api.cp_workspace.run",
             side_effect=build_mock_run(
                 fake_vds["pov_data"],
                 test_project_yaml["harnesses"][fake_vds["pov_harness"]]["name"],
                 sanitizer=(
-                    runner.workspace.project_yaml["sanitizers"][
-                        fake_vds["pou_sanitizer"]
-                    ]
-                    if sanitizer_fires
-                    else None
+                    san if fires else ""
+                    for fires, san in zip(sanitizer_fires, [san, san, san])
                 ),
                 container_name=test_project_yaml["docker_image"],
             ),
-        ), mock.patch(
-            "competition_api.cp_workspace.CPWorkspace.setup",
-            build_mock_setup(repo),
         ):
             await runner.test_vds(vds)
 
-        with sessionmaker(engine)() as db:
-            db_vds = db.execute(
+        event = runner.auditor.get_events(expected_event_type)
+        assert event
+        event = event[0]
+
+        success_test = not expected_event_type == EventType.VD_SUBMISSION_FAIL
+
+        if not success_test:
+            assert event.reasons == fail_reason
+
+        sanitizer_results = runner.auditor.get_events(EventType.VD_SANITIZER_RESULT)
+        assert len(sanitizer_results) == 3
+        for fires, result in zip(sanitizer_fires, sanitizer_results):
+            assert result.expected_sanitizer_triggered == fires
+
+        with sessionmaker(engine, expire_on_commit=False)() as db:
+            vds = db.execute(
                 select(VulnerabilityDiscovery).where(
                     VulnerabilityDiscovery.id == fake_vds["id"]
                 )
-            ).fetchall()[0][0]
+            ).fetchone()[0]
 
-            expected_status = (
-                FeedbackStatus.ACCEPTED
-                if sanitizer_fires
-                else FeedbackStatus.NOT_ACCEPTED
+            if success_test:
+                assert vds.status == FeedbackStatus.ACCEPTED
+                assert vds.cpv_uuid
+            else:
+                assert vds.status == FeedbackStatus.NOT_ACCEPTED
+                assert vds.cpv_uuid is None
+
+    @staticmethod
+    async def test_test_vds_duplicate(
+        fake_vds,
+        fake_vds_dict,
+        fake_cp,
+        creds,
+        test_project_yaml,
+        repo,
+    ):
+        engine = create_engine(v.get("database.url"))
+        setup, src_repo = build_mock_setup(repo)
+        with sessionmaker(engine, expire_on_commit=False)() as db:
+            commit_sha = src_repo.head.commit.hexsha
+
+            db.execute(
+                insert(VulnerabilityDiscovery).values(
+                    **{**fake_vds_dict, "pou_commit_sha1": commit_sha}
+                )
             )
-            assert (
-                db_vds.status == expected_status
-            ), f"status was {db_vds.status}, expected {expected_status}"
+            vds = list(
+                db.execute(
+                    update(VulnerabilityDiscovery)
+                    .where(VulnerabilityDiscovery.id == fake_vds["id"])
+                    .values(pou_commit_sha1=commit_sha)
+                    .returning(VulnerabilityDiscovery)
+                )
+            )[0][0]
+
+            db.commit()
+
+        auditor = RecordingAuditor(creds[0])
+        auditor.push_context(vd_uuid=fake_vds["id"], cp_name=fake_vds["cp_name"])
+        runner = TaskRunner(fake_cp, auditor)
+
+        san = runner.workspace.project_yaml["sanitizers"][fake_vds["pou_sanitizer"]]
+
+        with mock.patch(
+            "competition_api.cp_workspace.CPWorkspace.setup",
+            setup,
+        ), mock.patch(
+            "competition_api.cp_workspace.run",
+            side_effect=build_mock_run(
+                fake_vds["pov_data"],
+                test_project_yaml["harnesses"][fake_vds["pov_harness"]]["name"],
+                sanitizer=(san for san in [san, san, ""]),
+                container_name=test_project_yaml["docker_image"],
+            ),
+        ):
+            await runner.test_vds(vds)
+
+        event = runner.auditor.get_events(EventType.VD_SUBMISSION_FAIL)
+        assert event
+        event = event[0]
+
+        assert event.reasons == [VDSubmissionFailReason.DUPLICATE_COMMIT]
+
+        with sessionmaker(engine, expire_on_commit=False)() as db:
+            vds = db.execute(
+                select(VulnerabilityDiscovery).where(
+                    VulnerabilityDiscovery.id == fake_vds["id"]
+                )
+            ).fetchone()[0]
+
+            assert vds.status == FeedbackStatus.NOT_ACCEPTED
+            assert vds.cpv_uuid is None
 
 
 class TestTestGP:
     @staticmethod
     @pytest.mark.parametrize(
-        "patch_applies,sanitizer_does_not_fire,functional_tests_pass",
+        "patch_builds,functional_tests_pass,sanitizer_does_not_fire",
         [
             (True, True, True),
             (True, True, False),
             (True, False, True),
-            (False, True, True),
             (True, False, False),
-            (False, False, False),
+            (False, True, True),
             (False, True, False),
+            (False, False, True),
+            (False, False, False),
         ],
     )
     async def test_test_gp(
@@ -196,43 +352,50 @@ class TestTestGP:
         fake_accepted_vds,
         fake_gp,
         repo,
-        patch_applies,
-        sanitizer_does_not_fire,
+        patch_builds,
         functional_tests_pass,
+        sanitizer_does_not_fire,
         test_project_yaml,
-    ):  # pylint: disable=too-many-arguments
+        creds,
+    ):
         engine = create_engine(v.get("database.url"))
-        with sessionmaker(engine)() as db:
+        setup, src_repo = build_mock_setup(repo)
+        with sessionmaker(engine, expire_on_commit=False)() as db:
             # make sure the commit sha we want to check out is in the repo
             db.execute(
                 update(VulnerabilityDiscovery)
                 .where(VulnerabilityDiscovery.id == fake_accepted_vds["id"])
-                .values(pou_commit_sha1=repo.head.commit.hexsha)
+                .values(pou_commit_sha1=src_repo.head.commit.hexsha)
             )
 
             gp = db.execute(
                 select(GeneratedPatch).where(GeneratedPatch.id == fake_gp["id"])
-            ).fetchall()[0][0]
+            ).fetchone()[0]
 
             vds = db.execute(
                 select(VulnerabilityDiscovery).where(
                     VulnerabilityDiscovery.id == fake_accepted_vds["id"]
                 )
-            ).fetchall()[0][0]
+            ).fetchone()[0]
 
-            assert (
-                gp.patch_applied is None
-            ), f"patch_applied was {gp.patch_applied} immediately after creation"
-            assert (
-                gp.sanitizer_did_not_fire is None
-            ), f"sanitizer_did_not_fire was {gp.sanitizer_did_not_fire} immediately after creation"
-            assert gp.functional_tests_passed is None, (
-                f"functional_tests_passed was {gp.functional_tests_passed} immediately "
-                "after creation"
-            )
+            db.commit()
 
-        runner = TaskRunner(fake_cp, mock.Mock(spec=Auditor))
+        auditor = RecordingAuditor(creds[0])
+        auditor.push_context(
+            vd_uuid=fake_accepted_vds["id"],
+            cp_name=fake_accepted_vds["cp_name"],
+            gp_uuid=fake_gp["id"],
+            cpv_uuid=fake_accepted_vds["cpv_uuid"],
+        )
+        runner = TaskRunner(fake_cp, auditor)
 
+        san = (
+            ""
+            if sanitizer_does_not_fire
+            else runner.workspace.project_yaml["sanitizers"][
+                fake_accepted_vds["pou_sanitizer"]
+            ]
+        )
         with mock.patch(
             "competition_api.cp_workspace.run",
             side_effect=build_mock_run(
@@ -241,46 +404,122 @@ class TestTestGP:
                     "name"
                 ],
                 gp_patch=fake_gp["data"],
-                sanitizer=(
-                    None
-                    if sanitizer_does_not_fire
-                    else runner.workspace.project_yaml["sanitizers"][
-                        fake_accepted_vds["pou_sanitizer"]
-                    ]
-                ),
-                patch_returncode=0 if patch_applies else 1,
+                sanitizer=(san for san in [san, san, ""]),
+                patch_returncode=0 if patch_builds else 1,
                 tests_returncode=0 if functional_tests_pass else 1,
                 container_name=test_project_yaml["docker_image"],
             ),
         ), mock.patch(
             "competition_api.cp_workspace.CPWorkspace.setup",
-            build_mock_setup(repo),
+            setup,
         ):
             await runner.test_gp(gp, vds)
 
-        with sessionmaker(engine)() as db:
-            db_gp = db.execute(
-                select(GeneratedPatch).where(GeneratedPatch.id == fake_gp["id"])
-            ).fetchall()[0][0]
+        # TODO duplicate
+        if patch_builds:
+            assert runner.auditor.get_events(EventType.GP_PATCH_BUILT)
+        else:
+            assert not runner.auditor.get_events(EventType.GP_PATCH_BUILT)
+            fail = runner.auditor.get_events(EventType.GP_SUBMISSION_FAIL)
+            assert fail
+            assert fail[0].reason == GPSubmissionFailReason.PATCH_DID_NOT_APPLY
+            return
 
-            assert db_gp.patch_applied == patch_applies, (
-                f"patch_applied was {db_gp.patch_applied} but patch_applies was "
-                f"{patch_applies}"
-            )
-            assert db_gp.sanitizer_did_not_fire == (
-                sanitizer_does_not_fire if patch_applies else None
-            ), (
-                f"sanitizer_did_not_fire was marked {db_gp.sanitizer_did_not_fire} but "
-                f"sanitizer_does_not_fire was {sanitizer_does_not_fire} and "
-                f"patch_applies was {patch_applies}"
-            )
-            assert db_gp.functional_tests_passed == (
-                functional_tests_pass
-                if patch_applies and sanitizer_does_not_fire
-                else None
-            ), (
-                f"functional_tests_passed was marked {db_gp.functional_tests_passed} "
-                f"but functional_tests_pass was {functional_tests_pass} and "
-                f"patch_applies was {patch_applies} and sanitizer_does_not_fire was "
-                f"{sanitizer_does_not_fire}"
-            )
+        if functional_tests_pass:
+            assert runner.auditor.get_events(EventType.GP_FUNCTIONAL_TESTS_PASS)
+        else:
+            assert not runner.auditor.get_events(EventType.GP_FUNCTIONAL_TESTS_PASS)
+            fail = runner.auditor.get_events(EventType.GP_SUBMISSION_FAIL)
+            assert fail
+            assert fail[0].reason == GPSubmissionFailReason.FUNCTIONAL_TESTS_FAILED
+            return
+
+        if sanitizer_does_not_fire:
+            assert runner.auditor.get_events(EventType.GP_SANITIZER_DID_NOT_FIRE)
+        else:
+            assert not runner.auditor.get_events(EventType.GP_SANITIZER_DID_NOT_FIRE)
+            fail = runner.auditor.get_events(EventType.GP_SUBMISSION_FAIL)
+            assert fail
+            assert fail[0].reason == GPSubmissionFailReason.SANITIZER_FIRED_AFTER_PATCH
+            return
+
+        assert runner.auditor.get_events(EventType.GP_SUBMISSION_SUCCESS)
+
+        with sessionmaker(engine, expire_on_commit=False)() as db:
+            gp = db.execute(
+                select(GeneratedPatch).where(GeneratedPatch.id == fake_gp["id"])
+            ).fetchone()[0]
+
+            if all([patch_builds, functional_tests_pass, sanitizer_does_not_fire]):
+                assert gp.status == FeedbackStatus.ACCEPTED
+            else:
+                assert gp.status == FeedbackStatus.NOT_ACCEPTED
+
+    @staticmethod
+    async def test_test_gp_duplicate(
+        fake_cp,
+        fake_accepted_vds,
+        fake_gp_dict,
+        fake_gp,
+        repo,
+        test_project_yaml,
+        creds,
+    ):
+        engine = create_engine(v.get("database.url"))
+        setup, _ = build_mock_setup(repo)
+        with sessionmaker(engine, expire_on_commit=False)() as db:
+            db.execute(insert(GeneratedPatch).values(**fake_gp_dict))
+
+            gp = db.execute(
+                select(GeneratedPatch).where(GeneratedPatch.id == fake_gp["id"])
+            ).fetchone()[0]
+
+            vds = db.execute(
+                select(VulnerabilityDiscovery).where(
+                    VulnerabilityDiscovery.id == fake_accepted_vds["id"]
+                )
+            ).fetchone()[0]
+
+            db.commit()
+
+        auditor = RecordingAuditor(creds[0])
+        auditor.push_context(
+            vd_uuid=fake_accepted_vds["id"],
+            cp_name=fake_accepted_vds["cp_name"],
+            gp_uuid=fake_gp["id"],
+            cpv_uuid=fake_accepted_vds["cpv_uuid"],
+        )
+        runner = TaskRunner(fake_cp, auditor)
+
+        san = runner.workspace.project_yaml["sanitizers"][
+            fake_accepted_vds["pou_sanitizer"]
+        ]
+        with mock.patch(
+            "competition_api.cp_workspace.run",
+            side_effect=build_mock_run(
+                fake_accepted_vds["pov_data"],
+                test_project_yaml["harnesses"][fake_accepted_vds["pov_harness"]][
+                    "name"
+                ],
+                gp_patch=fake_gp["data"],
+                sanitizer=(san for san in [san, san, ""]),
+                patch_returncode=0,
+                tests_returncode=0,
+                container_name=test_project_yaml["docker_image"],
+            ),
+        ), mock.patch(
+            "competition_api.cp_workspace.CPWorkspace.setup",
+            setup,
+        ):
+            await runner.test_gp(gp, vds)
+
+        fail = runner.auditor.get_events(EventType.GP_SUBMISSION_FAIL)
+        assert fail
+        assert fail[0].reason == GPSubmissionFailReason.DUPLICATE_CPV_UUID
+
+        with sessionmaker(engine, expire_on_commit=False)() as db:
+            gp = db.execute(
+                select(GeneratedPatch).where(GeneratedPatch.id == fake_gp["id"])
+            ).fetchone()[0]
+
+            assert gp.status == FeedbackStatus.NOT_ACCEPTED

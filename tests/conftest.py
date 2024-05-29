@@ -1,9 +1,11 @@
 # fixtures use dependency injection, so argument names must match fixture name
-# pylint: disable=redefined-outer-name
+# and they're sometimes used just for their side effects
+# pylint: disable=redefined-outer-name,unused-argument
 
 import base64
 import pathlib
 import tempfile
+from types import MappingProxyType
 from uuid import uuid4
 
 import pytest
@@ -22,6 +24,7 @@ from competition_api.db.common import Base
 from competition_api.db.session import db_session
 from competition_api.main import app
 from competition_api.models.types import FeedbackStatus
+from tests.lib.auditor import RecordingAuditor
 
 ENV = {"POSTGRES_PASSWORD": "secret", "POSTGRES_USER": "capi", "POSTGRES_DB": "capi"}
 
@@ -99,7 +102,7 @@ def db_config(db_container):
 
 
 @pytest.fixture
-def db(db_config):  # pylint: disable=unused-argument
+def db(db_config):
     engine = create_engine(v.get("database.url"))
     with sessionmaker(engine)() as session:
         yield session
@@ -139,16 +142,23 @@ def _create_and_return(db, table, row):
 
 
 @pytest.fixture
-def fake_vds(db, fake_cp, creds):
-    row = {
-        "team_id": creds[0],
-        "cp_name": fake_cp,
-        "pou_commit_sha1": "b124160e9fac8952706a6f0d5d6f71c85df9e77c",
-        "pou_sanitizer": "id_1",
-        "pov_harness": "id_1",
-        "pov_data": b"fake\n",
-    }
-    return _create_and_return(db, VulnerabilityDiscovery, row)
+def fake_vds_dict(creds, fake_cp):
+    return MappingProxyType(
+        {
+            "team_id": creds[0],
+            "cp_name": fake_cp,
+            "pou_commit_sha1": "b124160e9fac8952706a6f0d5d6f71c85df9e77c",
+            "pou_sanitizer": "id_1",
+            "pov_harness": "id_1",
+            "pov_data": b"fake\n",
+        }
+    )
+
+
+@pytest.fixture
+def fake_vds(fake_vds_dict, db):
+    fake_vds_dict = {**fake_vds_dict}
+    return _create_and_return(db, VulnerabilityDiscovery, fake_vds_dict)
 
 
 @pytest.fixture
@@ -167,9 +177,16 @@ def fake_accepted_vds(db, fake_cp, creds):
 
 
 @pytest.fixture
-def fake_gp(fake_accepted_vds, db):
-    row = {"data": b"fake\n", "cpv_uuid": fake_accepted_vds["cpv_uuid"]}
-    return _create_and_return(db, GeneratedPatch, row)
+def fake_gp_dict(fake_accepted_vds):
+    return MappingProxyType(
+        {"data": b"fake\n", "cpv_uuid": fake_accepted_vds["cpv_uuid"]}
+    )
+
+
+@pytest.fixture
+def fake_gp(fake_gp_dict, db):
+    fake_gp_dict = {**fake_gp_dict}
+    return _create_and_return(db, GeneratedPatch, fake_gp_dict)
 
 
 def pytest_collection_modifyitems(items):
@@ -177,3 +194,16 @@ def pytest_collection_modifyitems(items):
     session_scope_marker = pytest.mark.asyncio(scope="session")
     for async_test in pytest_asyncio_tests:
         async_test.add_marker(session_scope_marker, append=False)
+
+
+@pytest.fixture
+def auditor(creds):
+    return RecordingAuditor(creds[0])
+
+
+@pytest.fixture
+def mock_get_auditor(auditor):
+    def func(*_args, **_kwargs):
+        return auditor
+
+    return func

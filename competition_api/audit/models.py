@@ -4,12 +4,12 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from competition_api.models import GPSubmission
 from competition_api.models.types import FeedbackStatus
 
 from .types import (
     Disposition,
     EventType,
+    GPSubmissionFailReason,
     GPSubmissionInvalidReason,
     VDSubmissionFailReason,
     VDSubmissionInvalidReason,
@@ -23,8 +23,12 @@ class MockResponseEvent(BaseModel):
     description: str = "Mock content returned to client"
 
 
-class GPSubmissionEvent(GPSubmission):
+class GPSubmissionEvent(BaseModel):
     """A CRS has submitted a generated patch."""
+
+    gp_uuid: UUID
+    submitted_cpv_uuid: UUID
+    patch_b64: str
 
 
 class GPSubmissionInvalidEvent(BaseModel):
@@ -32,8 +36,49 @@ class GPSubmissionInvalidEvent(BaseModel):
 
     disposition: Disposition = Disposition.BAD
 
-    gp_uuid: UUID | None
+    gp_uuid: UUID
     reason: GPSubmissionInvalidReason
+
+
+class GPEvent(BaseModel):
+    vd_uuid: UUID
+    cp_name: str
+    gp_uuid: UUID
+    cpv_uuid: UUID
+
+
+class GPPatchBuiltEvent(GPEvent):
+    """A CP was built successfully with a patch"""
+
+    disposition: Disposition = Disposition.GOOD
+
+
+class GPFunctionalTestsPass(GPEvent):
+    """A CP's functional tests passed after the patch was applied"""
+
+    disposition: Disposition = Disposition.GOOD
+
+
+class GPSanitizerDidNotFire(GPEvent):
+    """After the GP's patch, the vulnerability no longer existed"""
+
+    disposition: Disposition = Disposition.GOOD
+
+
+class GPSubmissionFailEvent(GPEvent):
+    """The generated patch failed at a necessary part of the process."""
+
+    disposition: Disposition = Disposition.BAD
+    feedback_status: FeedbackStatus = FeedbackStatus.NOT_ACCEPTED
+
+    reason: GPSubmissionFailReason
+
+
+class GPSubmissionSuccessEvent(GPEvent):
+    """The GP passed all tests."""
+
+    disposition: Disposition = Disposition.GOOD
+    feedback_status: FeedbackStatus = FeedbackStatus.ACCEPTED
 
 
 class VDEvent(BaseModel):
@@ -102,12 +147,17 @@ class EventWrapper(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     event_type: EventType
     event: Union[
-        MockResponseEvent,
+        GPFunctionalTestsPass,
+        GPPatchBuiltEvent,
+        GPSanitizerDidNotFire,
         GPSubmissionEvent,
+        GPSubmissionFailEvent,
         GPSubmissionInvalidEvent,
-        VDSubmissionEvent,
-        VDSubmissionInvalidEvent,
-        VDSubmissionFailEvent,
-        VDSubmissionSuccessEvent,
+        GPSubmissionSuccessEvent,
+        MockResponseEvent,
         VDSanitizerResultEvent,
+        VDSubmissionEvent,
+        VDSubmissionFailEvent,
+        VDSubmissionInvalidEvent,
+        VDSubmissionSuccessEvent,
     ]

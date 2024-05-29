@@ -10,7 +10,15 @@ class Disposition(Enum):
 
 
 class GPSubmissionInvalidReason(Enum):
-    NO_MATCHING_VDS = "no_matching_vds"
+    INVALID_VDS_ID = "invalid_vds_id"
+    VDS_WAS_FROM_ANOTHER_TEAM = "vds_was_from_another_team"
+
+
+class GPSubmissionFailReason(Enum):
+    PATCH_DID_NOT_APPLY = "patch_did_not_apply"
+    SANITIZER_FIRED_AFTER_PATCH = "sanitizer_fired_after_patch"
+    FUNCTIONAL_TESTS_FAILED = "functional_tests_failed"
+    DUPLICATE_CPV_UUID = "duplicate_cpv_uuid"
 
 
 class VDSubmissionInvalidReason(Enum):
@@ -28,6 +36,11 @@ class VDSubmissionFailReason(Enum):
 class EventType(Enum):
     GP_SUBMISSION = "gp_submission"
     GP_SUBMISSION_INVALID = "gp_submission_invalid"
+    GP_SUBMISSION_FAIL = "gp_submission_failed"
+    GP_PATCH_BUILT = "gp_patch_built"
+    GP_FUNCTIONAL_TESTS_PASS = "gp_functional_tests_pass"
+    GP_SANITIZER_DID_NOT_FIRE = "gp_sanitizer_did_not_fire"
+    GP_SUBMISSION_SUCCESS = "gp_submission_success"
     VD_SANITIZER_RESULT = "vd_sanitizer_result"
     VD_SUBMISSION = "vd_submission"
     VD_SUBMISSION_FAIL = "vd_submission_failed"

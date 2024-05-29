@@ -1,2 +1,5 @@
 __pycache__/
 env
+.coverage
+capi-logs/audit.log
+e2e/*.json

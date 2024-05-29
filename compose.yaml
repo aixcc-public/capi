@@ -15,6 +15,8 @@ services:
     image: "postgres:16"
     # this makes postgres log queries
     # command: ["postgres", "-c", "log_statement=all"]
+    volumes:
+      - "pgdata:/var/lib/postgresql/data"
     ports:
       - 5432
     environment:
@@ -47,6 +49,7 @@ services:
         required: true
 volumes:
   shared-tmp:
+  pgdata:
 configs:
   capi:
     content: |

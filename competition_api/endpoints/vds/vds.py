@@ -8,7 +8,7 @@ from sqlalchemy import insert, select
 from structlog.stdlib import get_logger
 from vyper import v
 
-from competition_api.audit import Auditor
+from competition_api.audit import get_auditor
 from competition_api.audit.types import EventType
 from competition_api.db import VulnerabilityDiscovery
 from competition_api.models.types import FeedbackStatus, UUIDPathParameter
@@ -23,7 +23,7 @@ async def process_vd_upload(
     db: SAConnection,
     team_id: uuid.UUID,
 ) -> VDSResponse:
-    auditor = Auditor(team_id)
+    auditor = get_auditor(team_id)
 
     if v.get_bool("mock_mode"):
         await auditor.emit(EventType.MOCK_RESPONSE)

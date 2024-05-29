@@ -10,6 +10,7 @@ from competition_api.audit import Auditor
 from competition_api.audit.types import (
     Disposition,
     EventType,
+    GPSubmissionFailReason,
     VDSubmissionFailReason,
     VDSubmissionInvalidReason,
 )
@@ -29,10 +30,10 @@ class TaskRunner:
         self,
         pov_data: bytes,
         harness: str,
-        commit_ref: str,
+        commit_ref: str | None = None,
     ):
-
-        self.workspace.checkout(commit_ref)
+        if commit_ref:
+            self.workspace.checkout(commit_ref)
         await LOGGER.adebug("Calling harness %s with POV blob", harness)
         return await self.workspace.check_sanitizers(pov_data, harness)
         # TODO: store logs as artifact
@@ -61,9 +62,9 @@ class TaskRunner:
         for fail_reason, commit, triggered_is_good in [
             (
                 VDSubmissionFailReason.SANITIZER_DID_NOT_FIRE_AT_HEAD,
-                "HEAD",
+                v.get(f"cp_targets.{vds.cp_name}.main_branch") or "main",
                 True,
-            ),  # TODO: HEAD may not work
+            ),
             (
                 VDSubmissionFailReason.SANITIZER_DID_NOT_FIRE_AT_COMMIT,
                 vds.pou_commit_sha1,
@@ -119,11 +120,15 @@ class TaskRunner:
                     func.count(  # pylint: disable=not-callable
                         VulnerabilityDiscovery.id
                     )
-                ).where(VulnerabilityDiscovery.pou_commit_sha1 == vds.pou_commit_sha1)
+                ).where(
+                    VulnerabilityDiscovery.pou_commit_sha1 == vds.pou_commit_sha1,
+                    VulnerabilityDiscovery.team_id == vds.team_id,
+                )
             )
             submissions_for_commit = await submissions_for_commit.fetchone()
 
-            if submissions_for_commit[0] > 0:
+            # We already inserted a row for this one
+            if submissions_for_commit[0] > 1:
                 await self.auditor.emit(
                     EventType.VD_SUBMISSION_FAIL,
                     reasons=[VDSubmissionFailReason.DUPLICATE_COMMIT],
@@ -163,68 +168,89 @@ class TaskRunner:
     async def test_gp(self, gp: GeneratedPatch, vds: VulnerabilityDiscovery):
         await LOGGER.ainfo("Testing GP %s", gp)
 
+        # Check for duplicate
+        async with db_session() as db:
+            submissions_for_cpv_uuid = await db.execute(
+                select(
+                    func.count(GeneratedPatch.id)  # pylint: disable=not-callable
+                ).where(GeneratedPatch.cpv_uuid == gp.cpv_uuid)
+            )
+            submissions_for_cpv_uuid = await submissions_for_cpv_uuid.fetchone()
+
+            # We already inserted a row for this one
+            if submissions_for_cpv_uuid[0] > 1:
+                await self.auditor.emit(
+                    EventType.GP_SUBMISSION_FAIL,
+                    reason=GPSubmissionFailReason.DUPLICATE_CPV_UUID,
+                )
+                await db.execute(
+                    update(GeneratedPatch)
+                    .where(GeneratedPatch.id == gp.id)
+                    .values(status=FeedbackStatus.NOT_ACCEPTED)
+                )
+                return
+
         await self.workspace.setup()
 
-        self.workspace.checkout("HEAD")
+        self.workspace.checkout(
+            v.get(f"cp_targets.{vds.cp_name}.main_branch") or "main"
+        )
 
-        await LOGGER.adebug("Building")
-        async with db_session() as db:
-            result = await self.workspace.build(patch=gp.data)
-            patch_updates: dict[str, Any] = {"patch_applied": result}
+        # Build with patch
+        # TODO: Can't differentiate apply failure & build failure from outside ./runsh
+        await LOGGER.adebug("Building GP with patch")
+        result = await self.workspace.build(patch=gp.data)
 
-            if not result:
-                patch_updates["status"] = FeedbackStatus.NOT_ACCEPTED
-
-            # TODO: audit patch apply
-
-            await db.execute(
-                update(GeneratedPatch)
-                .where(GeneratedPatch.id == gp.id)
-                .values(**patch_updates)
+        if not result:
+            await self.auditor.emit(
+                EventType.GP_SUBMISSION_FAIL,
+                reason=GPSubmissionFailReason.PATCH_DID_NOT_APPLY,
             )
-
-            await LOGGER.ainfo("Patch applied: %s", result)
-            if not result:
-                await LOGGER.awarning("Patch failed")
-                return
-
-            result = not await self._sanitizers_triggered_at(
-                vds.pov_data, vds.pov_harness, "HEAD"
-            )
-            sanitizer_updates: dict[str, Any] = {"sanitizer_did_not_fire": result}
-            if not result:
-                sanitizer_updates["status"] = FeedbackStatus.NOT_ACCEPTED
-
-            await db.execute(
-                update(GeneratedPatch)
-                .where(GeneratedPatch.id == gp.id)
-                .values(**sanitizer_updates)
-            )
-
-            await LOGGER.ainfo("Sanitizer did not fire after patch: %s", result)
-            if not result:
-                await LOGGER.awarning("Sanitizer fired after patch")
-                return
-
-            # TODO: at this point the patch is ACCEPTED, but we have to audit this as a failure
-            result = await self.workspace.run_functional_tests()
-
-            # TODO: test PoV _after_ func tests, not before
-
-            # TODO: "Intentional Vuln?" box is not fill-out-able
-
-            # TODO: check duplicate
-
-            await LOGGER.adebug("Updating GP in database")
-            await db.execute(
-                update(GeneratedPatch)
-                .where(GeneratedPatch.id == gp.id)
-                .values(
-                    status=(
-                        FeedbackStatus.ACCEPTED
-                        if result
-                        else FeedbackStatus.NOT_ACCEPTED
-                    ),
-                    functional_tests_passed=result,
+            async with db_session() as db:
+                await db.execute(
+                    update(GeneratedPatch)
+                    .where(GeneratedPatch.id == gp.id)
+                    .values(status=FeedbackStatus.NOT_ACCEPTED)
                 )
+            return
+
+        await self.auditor.emit(EventType.GP_PATCH_BUILT)
+
+        # The rest of the failures are silent
+        async with db_session() as db:
+            await db.execute(
+                update(GeneratedPatch)
+                .where(GeneratedPatch.id == gp.id)
+                .values(status=FeedbackStatus.ACCEPTED)
             )
+
+        # Run functional tests
+        result = await self.workspace.run_functional_tests()
+        if not result:
+            await self.auditor.emit(
+                EventType.GP_SUBMISSION_FAIL,
+                reason=GPSubmissionFailReason.FUNCTIONAL_TESTS_FAILED,
+            )
+            return
+
+        await self.auditor.emit(EventType.GP_FUNCTIONAL_TESTS_PASS)
+
+        # Check if sanitizers fire
+        triggered = vds.pou_sanitizer in await self._sanitizers_triggered_at(
+            vds.pov_data, vds.pov_harness
+        )
+
+        if triggered:
+            await self.auditor.emit(
+                EventType.GP_SUBMISSION_FAIL,
+                reason=GPSubmissionFailReason.SANITIZER_FIRED_AFTER_PATCH,
+            )
+            return
+
+        await self.auditor.emit(EventType.GP_SANITIZER_DID_NOT_FIRE)
+
+        # TODO: "Intentional Vuln?" box is not fill-out-able
+        # TODO: Private PoV suite?
+        # TODO: mark for manual review
+
+        await self.auditor.emit(EventType.GP_SUBMISSION_SUCCESS)

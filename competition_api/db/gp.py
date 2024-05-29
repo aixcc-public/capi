@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import sqlalchemy
-from sqlalchemy import Boolean, ForeignKey, LargeBinary, Uuid
+from sqlalchemy import ForeignKey, LargeBinary, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from competition_api.db.common import Base
@@ -19,14 +19,9 @@ class GeneratedPatch(Base):
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
 
     cpv_uuid: Mapped[UUID] = mapped_column(
-        Uuid, ForeignKey(f"{vds_tablename}.cpv_uuid"), nullable=False
+        Uuid, ForeignKey(f"{vds_tablename}.cpv_uuid"), nullable=True
     )
     data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
-
-    # scoring
-    patch_applied: Mapped[bool] = mapped_column(Boolean, nullable=True)
-    sanitizer_did_not_fire: Mapped[bool] = mapped_column(Boolean, nullable=True)
-    functional_tests_passed: Mapped[bool] = mapped_column(Boolean, nullable=True)
 
     status: Mapped[FeedbackStatus] = mapped_column(
         sqlalchemy.Enum(FeedbackStatus, native_enum=False),
