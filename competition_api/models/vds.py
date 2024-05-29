@@ -2,6 +2,7 @@ import uuid
 from typing import Annotated
 
 from pydantic import UUID4, Base64Bytes, BaseModel, Field, StringConstraints
+from pydantic.functional_validators import AfterValidator
 
 from competition_api.models.examples import (
     EXAMPLE_B64,
@@ -10,6 +11,7 @@ from competition_api.models.examples import (
     EXAMPLE_SHA1,
 )
 from competition_api.models.types import FeedbackStatus
+from competition_api.models.validators import max_size
 
 ID_REGEX = r"^id_[0-9]+$"
 ID_CONSTRAINTS = StringConstraints(strip_whitespace=True, pattern=ID_REGEX)
@@ -22,6 +24,8 @@ SHA1_CONSTRAINTS = StringConstraints(
     max_length=40,
     min_length=40,
 )
+
+MiB_2 = 2097152
 
 
 class POU(BaseModel):
@@ -37,7 +41,9 @@ class POU(BaseModel):
 
 class POV(BaseModel):
     harness: Annotated[str, ID_CONSTRAINTS]
-    data: Base64Bytes
+    data: Annotated[Base64Bytes, AfterValidator(max_size(MiB_2))] = Field(
+        description="POV input binary blob in base64.  Maximum allowed size is 2MiB before base64."
+    )
 
     model_config = {
         "json_schema_extra": {

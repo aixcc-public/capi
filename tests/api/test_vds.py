@@ -76,6 +76,38 @@ class TestVDS:
                 },
                 422,
             ),
+            (
+                {
+                    "cp_name": "fakecp",
+                    "pou": {
+                        "commit_sha1": "b124160e9fac8952706a6f0d5d6f71c85df9e77c",
+                        "sanitizer": "id_1",
+                    },
+                    "pov": {
+                        "harness": "id_1",
+                        "data": base64.b64encode(b"\00" * (1024 * 1024 * 2 + 1)).decode(
+                            "utf8"
+                        ),  # 2MiB + 1 byte input
+                    },
+                },
+                422,
+            ),
+            (
+                {
+                    "cp_name": "fakecp",
+                    "pou": {
+                        "commit_sha1": "b124160e9fac8952706a6f0d5d6f71c85df9e77c",
+                        "sanitizer": "id_1",
+                    },
+                    "pov": {
+                        "harness": "id_1",
+                        "data": base64.b64encode(b"\00" * (1024 * 1024 * 2)).decode(
+                            "utf8"
+                        ),  # 2MiB input
+                    },
+                },
+                200,
+            ),
         ],
     )
     def test_post(

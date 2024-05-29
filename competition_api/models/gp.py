@@ -1,14 +1,21 @@
 import uuid
+from typing import Annotated
 
-from pydantic import UUID4, Base64Str, BaseModel
+from pydantic import UUID4, Base64Str, BaseModel, Field
+from pydantic.functional_validators import AfterValidator
 
 from competition_api.models.examples import EXAMPLE_B64
 from competition_api.models.types import FeedbackStatus
+from competition_api.models.validators import max_size
+
+KiB_100 = 102400
 
 
 class GPSubmission(BaseModel):
     cpv_uuid: UUID4
-    data: Base64Str
+    data: Annotated[Base64Str, AfterValidator(max_size(KiB_100))] = Field(
+        description="Base64'd patch file.  Maximum allowed size is 100KiB before base64."
+    )
 
     model_config = {
         "json_schema_extra": {

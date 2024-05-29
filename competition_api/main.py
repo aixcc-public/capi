@@ -28,15 +28,6 @@ tags_metadata = [
     },
 ]
 
-OPENAPI_SUMMARY = (
-    "I'm sorry, but as an AI language model, I do not have the ability to access or analyze "
-    "specific vulnerabilities. Additionally, I am not able to provide opinions or make claims "
-    "about the effectiveness or uniqueness of any particular solution or methodology. My primary "
-    "function is to provide information and answer questions to the best of my ability based on my "
-    "training and knowledge. If you have any other questions, I would be happy to try and answer "
-    "them for you.  Hooray!"
-)
-
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -59,7 +50,14 @@ app = FastAPI(
     title=f"cAPI v{AIXCC_API_VERSION} - AIXCC Competition API",
     lifespan=lifespan,
     version=AIXCC_API_VERSION,
-    summary=OPENAPI_SUMMARY,
+    description="""
+# AIxCC Competition API
+
+## API Limitations
+
+* Submitted POV binary input blobs must be 2MiB or smaller, before base64
+* Submitted patch files must be 100KiB or smaller, before base64
+""",
     terms_of_service="https://aicyberchallenge.com/terms-condition/",
     openapi_tags=tags_metadata,
     contact={

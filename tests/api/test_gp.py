@@ -18,6 +18,7 @@ class TestGP:
         "body,invalid_reason",
         [
             ({"data": "ZmFrZQo="}, None),
+            ({"data": "A" * (1024 * 100)}, None),  # 100KiB input
             ({"data": "ZmFrZQo="}, GPSubmissionInvalidReason.INVALID_VDS_ID),
             ({"data": "ZmFrZQo="}, GPSubmissionInvalidReason.VDS_WAS_FROM_ANOTHER_TEAM),
         ],
@@ -94,9 +95,34 @@ class TestGP:
         "body",
         [{"data": "ZmFrZQo="}],
     )
-    def test_post_bad(client, body, fake_vds, auth_header):
+    def test_post_bad_uuid(client, body, fake_vds, auth_header):
         body["cpv_uuid"] = fake_vds.get("cpv_uuid")
         resp = client.post("/submission/gp/", json=body, headers=auth_header)
+
+        assert resp.status_code == 422
+
+    @staticmethod
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {
+                "data": base64.b64encode(b"\00" * (1024 * 100 + 1)).decode("utf8")
+            },  # 100KiB + 1 byte input
+        ],
+    )
+    def test_post_invalid_format(
+        client,
+        body,
+        fake_accepted_vds,
+        auth_header,
+        mock_get_auditor,
+    ):
+        body["cpv_uuid"] = str(fake_accepted_vds["cpv_uuid"])
+
+        with mock.patch(
+            "competition_api.endpoints.gp.gp.TaskRunner", autospec=True
+        ), mock.patch("competition_api.endpoints.gp.gp.get_auditor", mock_get_auditor):
+            resp = client.post("/submission/gp/", json=body, headers=auth_header)
 
         assert resp.status_code == 422
 
