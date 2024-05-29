@@ -18,6 +18,9 @@ lint:
 	poetry run mypy $(MODULES) || RC=1; \
 	exit $$RC
 
+tempdirs:
+	mkdir -p capi-logs
+
 build:
 	@docker build . -t capi
 
@@ -30,7 +33,7 @@ test:
 compose-build:
 	docker-compose build
 
-up: compose-build
+up: tempdirs compose-build
 	WEB_CONCURRENCY=4 docker-compose up
 
 down:
@@ -39,7 +42,7 @@ down:
 clean:
 	docker-compose down -v
 
-e2e: compose-build
+e2e: tempdirs compose-build
 	:>capi-logs/audit.log
 	WEB_CONCURRENCY=4 docker-compose up -d
 	cd e2e && ./run.sh; docker-compose down
