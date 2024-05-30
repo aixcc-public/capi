@@ -3,6 +3,7 @@
 # pylint: disable=redefined-outer-name,unused-argument
 
 import base64
+import os
 import pathlib
 import tempfile
 from types import MappingProxyType
@@ -49,7 +50,11 @@ def test_project_yaml():
 @pytest.fixture
 def repo(test_project_yaml):
     with tempfile.TemporaryDirectory(dir=v.get("tempdir")) as repo_dir:
-        repo_dir = pathlib.Path(repo_dir)
+        repo_dir = pathlib.Path(repo_dir) / "cp_root"
+
+        v.set("cp_root", repo_dir)
+
+        repo_dir = repo_dir / FAKE_CP_NAME
 
         project = "project.yaml"
         repo = Repo.init(repo_dir)
@@ -58,13 +63,27 @@ def repo(test_project_yaml):
         repo.index.add([project])
         repo.index.commit("initial")
 
+        cp_src_path = repo_dir / "src" / "samples"
+        os.makedirs(cp_src_path, exist_ok=True)
+        src_repo = Repo.init(cp_src_path)
+        dummy_file = os.path.join(src_repo.working_dir, "file")
+
+        latest = src_repo.git.head
+        for content in ["content", "more content"]:
+            with open(dummy_file, "a", encoding="utf8") as f:
+                f.write(content)
+
+            src_repo.index.add([dummy_file])
+            latest = src_repo.index.commit("initial")
+
+        src_repo.create_head("main", latest)
+
         yield repo
 
 
 @pytest.fixture
-def fake_cp(repo):
+def fake_cp():
     name = FAKE_CP_NAME
-    v.set(f"cp_targets.{name}.url", repo.working_dir)
     return name
 
 

@@ -25,7 +25,7 @@ def generate_config():
 
 
 def init_vyper():
-    v.set_env_prefix("CAPI")
+    v.set_env_prefix("AIXCC")
     v.automatic_env()
 
     v.set_config_type("yaml")

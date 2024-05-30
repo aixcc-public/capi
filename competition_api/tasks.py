@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -24,7 +25,7 @@ LOGGER = get_logger(__name__)
 class TaskRunner:
     def __init__(self, cp_name: str, auditor: Auditor):
         self.auditor = auditor
-        self.workspace = CPWorkspace(v.get(f"cp_targets.{cp_name}.url"))
+        self.workspace = CPWorkspace(Path(v.get("cp_root")) / cp_name)
 
     async def _sanitizers_triggered_at(
         self,

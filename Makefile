@@ -1,4 +1,13 @@
 MODULES=competition_api tests
+ROOT_DIR=$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
+
+# variables that control the volumes
+HOST_CAPI_LOGS = $(ROOT_DIR)/capi_logs
+
+# variables the control the CP repos
+HOST_CP_ROOT_DIR = $(ROOT_DIR)/cp_root
+
+VOLUMES = $(HOST_CAPI_LOGS) $(HOST_CP_ROOT_DIR)
 
 .PHONY: format sec lint build run test up down demo
 
@@ -18,8 +27,8 @@ lint:
 	poetry run mypy $(MODULES) || RC=1; \
 	exit $$RC
 
-tempdirs:
-	mkdir -p capi-logs
+local-volumes:
+	mkdir -p $(VOLUMES)
 
 build:
 	@docker build . -t capi
@@ -33,17 +42,25 @@ test:
 compose-build:
 	docker-compose build
 
-up: tempdirs compose-build
+up: local-volumes mock-cp compose-build
 	WEB_CONCURRENCY=4 docker-compose up
 
 down:
 	docker-compose down
 
+mock-cp: local-volumes
+	rm -rf $(HOST_CP_ROOT_DIR)/$@
+	git clone git@github.com:aixcc-sc/mock-cp.git $(HOST_CP_ROOT_DIR)/$@
+	cd $(HOST_CP_ROOT_DIR)/$@ && make cpsrc-prepare
+
+clean-volumes:
+	rm -rf $(VOLUMES)
+
 clean:
 	docker-compose down -v
 
-e2e: tempdirs compose-build
-	:>capi-logs/audit.log
+e2e: local-volumes mock-cp compose-build
+	:>$(HOST_CAPI_LOGS)/audit.log
 	WEB_CONCURRENCY=4 docker-compose up -d
 	cd e2e && ./run.sh; docker-compose down
-	cat capi-logs/audit.log
+	cat $(HOST_CAPI_LOGS)/audit.log

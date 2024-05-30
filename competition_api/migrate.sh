@@ -2,9 +2,9 @@
 
 MESSAGE=${1}
 
-export CAPI_DATABASE_NAME="capi"
-export CAPI_DATABASE_USERNAME="capi"
-export CAPI_DATABASE_PASSWORD="capisecret" # gitleaks:allow
+export AIXCC_DATABASE_NAME="capi"
+export AIXCC_DATABASE_USERNAME="capi"
+export AIXCC_DATABASE_PASSWORD="capisecret" # gitleaks:allow
 
 CONTAINER=capi-migrations
 
@@ -19,16 +19,16 @@ trap kill_container EXIT
 kill_container
 docker run \
 	--name ${CONTAINER} \
-	-e POSTGRES_PASSWORD=${CAPI_DATABASE_PASSWORD} \
-	-e POSTGRES_USER=${CAPI_DATABASE_USERNAME} \
-	-e POSTGRES_DB=${CAPI_DATABASE_NAME} \
+	-e POSTGRES_PASSWORD=${AIXCC_DATABASE_PASSWORD} \
+	-e POSTGRES_USER=${AIXCC_DATABASE_USERNAME} \
+	-e POSTGRES_DB=${AIXCC_DATABASE_NAME} \
 	-p 5432 \
 	-d \
 	postgres:16
 
 PORT=$(docker port capi-migrations 5432 | head -1 | sed 's/.*://g')
-export CAPI_DATABASE_HOST="127.0.0.1"
-export CAPI_DATABASE_PORT=${PORT}
+export AIXCC_DATABASE_HOST="127.0.0.1"
+export AIXCC_DATABASE_PORT=${PORT}
 
 sleep 2
 

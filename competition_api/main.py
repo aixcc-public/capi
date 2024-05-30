@@ -15,7 +15,7 @@ from competition_api.logging import logging_middleware, setup_logging
 LOGGER = get_logger()
 
 
-AIXCC_API_VERSION = os.environ.get("CAPI_API_VERSION", "0.0.0")
+AIXCC_API_VERSION = os.environ.get("AIXCC_API_VERSION", "0.0.0")
 
 tags_metadata = [
     {

@@ -39,8 +39,10 @@ class CPWorkspace:
         self.workdir = pathlib.Path(tempfile.mkdtemp(dir=v.get("tempdir")))
         self._repo_url = git_repo_url
 
-        self.repo = Repo.clone_from(self._repo_url, self.workdir)
-        self.src_repo: Repo | None = None
+        shutil.copytree(self._repo_url, self.workdir, dirs_exist_ok=True)
+
+        self.repo = Repo(self.workdir)
+        self.src_repo = Repo(self.workdir / "src" / "samples")
 
         self.project_yaml = YAML.load(self.workdir / "project.yaml")
 
@@ -75,8 +77,6 @@ class CPWorkspace:
             stdin=os.environ.get("GITHUB_TOKEN", ""),
         )
         await run("docker", "pull", self.project_yaml["docker_image"])
-        await run("make", "cpsrc-prepare", cwd=self.workdir)
-        self.src_repo = Repo(self.workdir / "src" / "samples")
 
     def checkout(self, ref: str):
         LOGGER.debug("Workspace: checkout %s", ref)

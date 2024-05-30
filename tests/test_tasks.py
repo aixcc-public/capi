@@ -24,19 +24,7 @@ from .lib.auditor import RecordingAuditor
 
 def build_mock_setup(base_repo):
     cp_src_path = os.path.join(base_repo.working_dir, "src", "samples")
-    os.makedirs(cp_src_path, exist_ok=True)
-    src_repo = Repo.init(cp_src_path)
-    dummy_file = os.path.join(src_repo.working_dir, "file")
-
-    latest = src_repo.git.head
-    for content in ["content", "more content"]:
-        with open(dummy_file, "a", encoding="utf8") as f:
-            f.write(content)
-
-        src_repo.index.add([dummy_file])
-        latest = src_repo.index.commit("initial")
-
-    src_repo.create_head("main", latest)
+    src_repo = Repo(cp_src_path)
 
     async def mock_setup(self):
         self.src_repo = src_repo

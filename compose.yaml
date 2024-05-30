@@ -32,17 +32,19 @@ services:
       - "8082:8080"
     volumes:
       - "shared-tmp:/tmp"
-      - "./capi-logs:/var/log/capi"
+      - "./capi_logs:/var/log/capi"
+      - "./cp_root:/cp_root"
     configs:
       - source: capi
         target: /etc/capi/config.yaml
     environment:
+      - AIXCC_CP_ROOT=/cp_root
+      - AIXCC_DATABASE_HOST=postgres
+      - AIXCC_DATABASE_NAME=capi
+      - AIXCC_DATABASE_PASSWORD=secret
+      - AIXCC_DATABASE_PORT=5432
+      - AIXCC_DATABASE_USERNAME=capi
       - DOCKER_HOST=tcp://dind:2376
-      - CAPI_DATABASE_PASSWORD=secret
-      - CAPI_DATABASE_USERNAME=capi
-      - CAPI_DATABASE_NAME=capi
-      - CAPI_DATABASE_HOST=postgres
-      - CAPI_DATABASE_PORT=5432
       - WEB_CONCURRENCY=$WEB_CONCURRENCY
     env_file:
       - path: ./env
@@ -56,6 +58,3 @@ configs:
       auth:
         preload:
           00000000-0000-0000-0000-000000000000: secret
-      cp_targets:
-        mock-cp:
-          url: "https://github.com/aixcc-sc/mock-cp.git"

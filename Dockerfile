@@ -46,9 +46,6 @@ RUN curl -fsSL "https://github.com/mikefarah/yq/releases/download/v4.44.1/yq_lin
 
 USER appuser
 
-RUN mkdir -p /home/appuser/.ssh && ssh-keyscan github.com >> /home/appuser/.ssh/known_hosts
-COPY gitconfig /home/appuser/.gitconfig
-
 # preinstall dependencies for faster iteration
 COPY pyproject.toml poetry.lock /code/
 WORKDIR /code
@@ -64,14 +61,14 @@ ENV PYTHONDONTWRITEBYTECODE 1 # disables pyc files
 # disables buffering stdout and stderr
 ENV PYTHONUNBUFFERED 1
 
-ENV CAPI_PORT 8080
+ENV AIXCC_PORT 8080
 
 HEALTHCHECK --interval=5s --retries=5 --start-period=3s --timeout=5s \
-    CMD curl --fail http://localhost:${CAPI_PORT} || exit 1
+    CMD curl --fail http://localhost:${AIXCC_PORT} || exit 1
 
 EXPOSE 80/tcp
 
 ARG api_version=0.0.0
-ENV CAPI_API_VERSION=${api_version}
+ENV AIXCC_API_VERSION=${api_version}
 
 ENTRYPOINT ["/code/entrypoint.sh"]

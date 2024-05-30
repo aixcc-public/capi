@@ -1,5 +1,6 @@
 __pycache__/
 env
 .coverage
-capi-logs/
+capi_logs/
+cp_root/
 e2e/*.json

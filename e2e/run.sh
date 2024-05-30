@@ -68,5 +68,3 @@ echo ""
 echo "Results"
 
 sleep 1
-
-cat ../capi-logs/audit.log
