@@ -44,6 +44,10 @@ RUN curl -fsSL "https://github.com/mikefarah/yq/releases/download/v4.44.1/yq_lin
     chmod a+x yq && \
     mv yq /usr/bin
 
+RUN mkdir /var/log/capi && \
+    chown appuser:appuser /var/log/capi && \
+    chmod 755 /var/log/capi
+
 USER appuser
 
 # preinstall dependencies for faster iteration
