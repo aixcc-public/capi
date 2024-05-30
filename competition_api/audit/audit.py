@@ -1,3 +1,4 @@
+import os
 from typing import Any
 from uuid import UUID
 
@@ -50,6 +51,7 @@ class Auditor:
         self._context: dict[str, Any] = {}
         self._team_id = team_id
         self._outfile = v.get("audit.file")
+        os.makedirs(os.path.dirname(self._outfile), exist_ok=True)
 
     async def _emit_event(self, event: Any):
         async with async_open(self._outfile, "a", encoding="utf8") as auditfile:

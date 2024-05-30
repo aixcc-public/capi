@@ -66,8 +66,6 @@ ENV AIXCC_PORT 8080
 HEALTHCHECK --interval=5s --retries=5 --start-period=3s --timeout=5s \
     CMD curl --fail http://localhost:${AIXCC_PORT} || exit 1
 
-EXPOSE 80/tcp
-
 ARG api_version=0.0.0
 ENV AIXCC_API_VERSION=${api_version}
 
