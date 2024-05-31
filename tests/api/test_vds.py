@@ -1,4 +1,5 @@
-# pylint: disable=too-many-arguments
+# pylint: disable=too-many-arguments,unused-argument
+
 import base64
 import os
 from hashlib import sha256
@@ -13,6 +14,7 @@ from competition_api.audit.types import EventType
 from competition_api.db import VulnerabilityDiscovery
 from competition_api.flatfile import Flatfile
 from competition_api.models.types import FeedbackStatus
+from tests.conftest import FAKE_CP_NAME
 
 
 class TestVDS:
@@ -22,7 +24,7 @@ class TestVDS:
         [
             (
                 {
-                    "cp_name": "fakecp",
+                    "cp_name": FAKE_CP_NAME,
                     "pou": {
                         "commit_sha1": "b124160e9fac8952706a6f0d5d6f71c85df9e77c",
                         "sanitizer": "id_1",
@@ -33,7 +35,7 @@ class TestVDS:
             ),
             (
                 {
-                    "cp_name": "fakecp",
+                    "cp_name": FAKE_CP_NAME,
                     "pou": {
                         "commit_sha1": "b124160e9fac8952706a6f0d5d6f71c85df9e77c",
                         "sanitizer": "id_1",
@@ -61,7 +63,7 @@ class TestVDS:
             ),
             (
                 {
-                    "cp_name": "fakecp",
+                    "cp_name": FAKE_CP_NAME,
                     "pov": {
                         "harness": "id_1",
                         "data": "i4uLi4WLi4uLi4uLi4uLi4uLi4xQi4uLi4uLjIuLiw==",  # non-text patch
@@ -71,7 +73,7 @@ class TestVDS:
             ),
             (
                 {
-                    "cp_name": "fakecp",
+                    "cp_name": FAKE_CP_NAME,
                     "pou": {
                         "commit_sha1": "b124160e9fac8952706a6f0d5d6f71c85df9e77c",
                         "sanitizer": "id_1",
@@ -81,7 +83,7 @@ class TestVDS:
             ),
             (
                 {
-                    "cp_name": "fakecp",
+                    "cp_name": FAKE_CP_NAME,
                     "pou": {
                         "commit_sha1": "b124160e9fac8952706a6f0d5d6f71c85df9e77c",
                         "sanitizer": "id_1",
@@ -97,7 +99,7 @@ class TestVDS:
             ),
             (
                 {
-                    "cp_name": "fakecp",
+                    "cp_name": FAKE_CP_NAME,
                     "pou": {
                         "commit_sha1": "b124160e9fac8952706a6f0d5d6f71c85df9e77c",
                         "sanitizer": "id_1",
@@ -111,10 +113,24 @@ class TestVDS:
                 },
                 200,
             ),
+            (
+                {
+                    "cp_name": "not-a-real-cp",
+                    "pou": {
+                        "commit_sha1": "b124160e9fac8952706a6f0d5d6f71c85df9e77c",
+                        "sanitizer": "id_1",
+                    },
+                    "pov": {
+                        "harness": "id_1",
+                        "data": "i4uLi4WLi4uLi4uLi4uLi4uLi4xQi4uLi4uLjIuLiw==",  # non-text patch
+                    },
+                },
+                404,
+            ),
         ],
     )
     def test_post(
-        db, client, body, return_code, auth_header, mock_get_auditor, auditor
+        db, client, body, return_code, auth_header, mock_get_auditor, auditor, repo
     ):
         with mock.patch(
             "competition_api.endpoints.vds.vds.TaskRunner", autospec=True
@@ -130,7 +146,9 @@ class TestVDS:
         resp = resp.json()
 
         db_row = db.execute(select(VulnerabilityDiscovery)).fetchall()
-        assert len(db_row) == (1 if success else 0)
+        assert len(db_row) == (
+            1 if success or body.get("cp_name") == "not-a-real-cp" else 0
+        )
 
         if success:
             data = base64.b64decode(body.get("pov").get("data"))

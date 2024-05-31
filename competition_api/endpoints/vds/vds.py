@@ -1,4 +1,5 @@
 import asyncio
+import os
 import uuid
 
 from aiopg.sa import SAConnection
@@ -8,7 +9,7 @@ from structlog.stdlib import get_logger
 from vyper import v
 
 from competition_api.audit import get_auditor
-from competition_api.audit.types import EventType
+from competition_api.audit.types import EventType, VDSubmissionInvalidReason
 from competition_api.db import VulnerabilityDiscovery
 from competition_api.flatfile import Flatfile
 from competition_api.models.types import FeedbackStatus, UUIDPathParameter
@@ -50,6 +51,17 @@ async def process_vd_upload(
     db_row = await db_row.fetchone()
 
     auditor.push_context(cp_name=vds.cp_name, vd_uuid=db_row.id)
+
+    if not os.path.isdir(os.path.join(v.get("cp_root"), vds.cp_name)):
+        await auditor.emit(
+            EventType.VD_SUBMISSION_INVALID,
+            reason=VDSubmissionInvalidReason.CP_NOT_IN_CP_ROOT_FOLDER,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="CP not found",
+            headers={"WWW-Authenticate": "Basic"},
+        )
 
     await auditor.emit(
         EventType.VD_SUBMISSION,
