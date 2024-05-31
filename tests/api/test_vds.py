@@ -196,8 +196,10 @@ class TestVDS:
             }
         ],
     )
-    def test_get(db, client, row, creds, auth_header):
+    async def test_get(db, client, row, creds, auth_header):
         blob = Flatfile(contents=b"fake\n")
+        await blob.write()
+
         row["pov_data_sha256"] = blob.sha256
 
         row["team_id"] = creds[0]

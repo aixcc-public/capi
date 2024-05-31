@@ -35,6 +35,7 @@ async def process_vd_upload(
         )
 
     blob = Flatfile(contents=vds.pov.data)
+    await blob.write()
 
     row = {
         "team_id": team_id,

@@ -167,8 +167,9 @@ def _create_and_return(db, table, row):
 
 
 @pytest.fixture
-def fake_vds_dict(creds, fake_cp):
+async def fake_vds_dict(creds, fake_cp):
     blob = Flatfile(contents=b"fake\n")
+    await blob.write()
     return MappingProxyType(
         {
             "team_id": creds[0],
@@ -188,8 +189,10 @@ def fake_vds(fake_vds_dict, db):
 
 
 @pytest.fixture
-def fake_accepted_vds(db, fake_cp, creds):
+async def fake_accepted_vds(db, fake_cp, creds):
     blob = Flatfile(contents=b"fake\n")
+    await blob.write()
+
     row = {
         "team_id": creds[0],
         "cp_name": fake_cp,
@@ -204,8 +207,9 @@ def fake_accepted_vds(db, fake_cp, creds):
 
 
 @pytest.fixture
-def fake_gp_dict(fake_accepted_vds):
+async def fake_gp_dict(fake_accepted_vds):
     patch = Flatfile(contents=b"fake\n")
+    await patch.write()
     return MappingProxyType(
         {"data_sha256": patch.sha256, "cpv_uuid": fake_accepted_vds["cpv_uuid"]}
     )

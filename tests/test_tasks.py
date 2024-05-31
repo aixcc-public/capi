@@ -209,9 +209,7 @@ class TestTestVDS:
 
         san = runner.workspace.project_yaml["sanitizers"][fake_vds["pou_sanitizer"]]
 
-        blob = Flatfile(contents_hash=fake_vds["pov_data_sha256"])
-        with open(blob.filename, "rb") as blobfile:
-            pov_data = blobfile.read()
+        pov_data = await Flatfile(contents_hash=fake_vds["pov_data_sha256"]).read()
 
         with mock.patch(
             "competition_api.cp_workspace.CPWorkspace.setup",
@@ -294,9 +292,7 @@ class TestTestVDS:
 
         san = runner.workspace.project_yaml["sanitizers"][fake_vds["pou_sanitizer"]]
 
-        blob = Flatfile(contents_hash=fake_vds["pov_data_sha256"])
-        with open(blob.filename, "rb") as blobfile:
-            pov_data = blobfile.read()
+        pov_data = await Flatfile(contents_hash=fake_vds["pov_data_sha256"]).read()
 
         with mock.patch(
             "competition_api.cp_workspace.CPWorkspace.setup",
@@ -394,13 +390,10 @@ class TestTestGP:
             ]
         )
 
-        blob = Flatfile(contents_hash=fake_accepted_vds["pov_data_sha256"])
-        with open(blob.filename, "rb") as blobfile:
-            pov_data = blobfile.read()
-
-        blob = Flatfile(contents_hash=fake_gp["data_sha256"])
-        with open(blob.filename, "rb") as blobfile:
-            patch = blobfile.read()
+        pov_data = await Flatfile(
+            contents_hash=fake_accepted_vds["pov_data_sha256"]
+        ).read()
+        patch = await Flatfile(contents_hash=fake_gp["data_sha256"]).read()
 
         with mock.patch(
             "competition_api.cp_workspace.run",
@@ -501,13 +494,10 @@ class TestTestGP:
             fake_accepted_vds["pou_sanitizer"]
         ]
 
-        blob = Flatfile(contents_hash=fake_accepted_vds["pov_data_sha256"])
-        with open(blob.filename, "rb") as blobfile:
-            pov_data = blobfile.read()
-
-        blob = Flatfile(contents_hash=fake_gp["data_sha256"])
-        with open(blob.filename, "rb") as blobfile:
-            patch = blobfile.read()
+        pov_data = await Flatfile(
+            contents_hash=fake_accepted_vds["pov_data_sha256"]
+        ).read()
+        patch = await Flatfile(contents_hash=fake_gp["data_sha256"]).read()
 
         with mock.patch(
             "competition_api.cp_workspace.run",

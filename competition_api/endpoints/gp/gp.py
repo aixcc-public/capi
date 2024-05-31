@@ -37,6 +37,8 @@ async def process_gp_upload(
     row: dict[str, Any] = {}
 
     patch = Flatfile(contents=gp.data.encode("utf8"))
+    await patch.write()
+
     row["data_sha256"] = patch.sha256
 
     gp_row = await db.execute(
