@@ -1,5 +1,5 @@
 import asyncio
-import base64
+from typing import Any
 from uuid import UUID
 
 from aiopg.sa import SAConnection
@@ -12,6 +12,7 @@ from competition_api.audit import get_auditor
 from competition_api.audit.types import EventType, GPSubmissionInvalidReason
 from competition_api.db import GeneratedPatch, VulnerabilityDiscovery, fastapi_get_db
 from competition_api.endpoints.lib.auth import get_token_id
+from competition_api.flatfile import Flatfile
 from competition_api.models import GPResponse, GPStatusResponse, GPSubmission
 from competition_api.models.types import FeedbackStatus, UUIDPathParameter
 from competition_api.tasks import TaskRunner
@@ -33,9 +34,10 @@ async def process_gp_upload(
         )
 
     # Create GP row
-    row: dict[str, bytes] = {}
-    # Postgres wants a binary format for this field
-    row["data"] = gp.data.encode("utf8")
+    row: dict[str, Any] = {}
+
+    patch = Flatfile(contents=gp.data.encode("utf8"))
+    row["data_sha256"] = patch.sha256
 
     gp_row = await db.execute(
         insert(GeneratedPatch).values(**row).returning(GeneratedPatch)
@@ -46,7 +48,7 @@ async def process_gp_upload(
     await auditor.emit(
         EventType.GP_SUBMISSION,
         submitted_cpv_uuid=gp.cpv_uuid,
-        patch_b64=base64.b64encode(row["data"]),
+        patch_sha256=patch.sha256,
     )
 
     vds = await db.execute(
@@ -90,7 +92,7 @@ async def process_gp_upload(
 
     return GPResponse(
         status=gp_row.status,
-        patch_size=len(gp_row.data),
+        patch_size=len(gp.data),
         gp_uuid=gp_row.id,
     )
 

@@ -28,7 +28,7 @@ class GPSubmissionEvent(BaseModel):
 
     gp_uuid: UUID
     submitted_cpv_uuid: UUID
-    patch_b64: str
+    patch_sha256: str
 
 
 class GPSubmissionInvalidEvent(BaseModel):
@@ -93,7 +93,7 @@ class VDSubmissionEvent(VDEvent):
     """A CRS has submitted a vulnerability discovery."""
 
     harness: str
-    pov_blob_b64: str
+    pov_blob_sha256: str
     pou_commit: str
     sanitizer: str
 

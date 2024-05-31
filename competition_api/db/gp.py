@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import sqlalchemy
-from sqlalchemy import ForeignKey, LargeBinary, Uuid
+from sqlalchemy import ForeignKey, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from competition_api.db.common import Base
@@ -21,7 +21,7 @@ class GeneratedPatch(Base):
     cpv_uuid: Mapped[UUID] = mapped_column(
         Uuid, ForeignKey(f"{vds_tablename}.cpv_uuid"), nullable=True
     )
-    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    data_sha256: Mapped[str] = mapped_column(String, nullable=False)
 
     status: Mapped[FeedbackStatus] = mapped_column(
         sqlalchemy.Enum(FeedbackStatus, native_enum=False),
@@ -33,7 +33,7 @@ class GeneratedPatch(Base):
     )
 
     def __repr__(self):
-        return f"GeneratedPatch<{len(self.data)} bytes>"
+        return f"GeneratedPatch<{self.data_sha256}>"
 
     def __str__(self):
         return repr(self)

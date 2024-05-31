@@ -16,6 +16,7 @@ from competition_api.audit.types import (
     VDSubmissionFailReason,
 )
 from competition_api.db import GeneratedPatch, VulnerabilityDiscovery
+from competition_api.flatfile import Flatfile
 from competition_api.models.types import FeedbackStatus
 from competition_api.tasks import TaskRunner
 
@@ -208,13 +209,17 @@ class TestTestVDS:
 
         san = runner.workspace.project_yaml["sanitizers"][fake_vds["pou_sanitizer"]]
 
+        blob = Flatfile(contents_hash=fake_vds["pov_data_sha256"])
+        with open(blob.filename, "rb") as blobfile:
+            pov_data = blobfile.read()
+
         with mock.patch(
             "competition_api.cp_workspace.CPWorkspace.setup",
             setup,
         ), mock.patch(
             "competition_api.cp_workspace.run",
             side_effect=build_mock_run(
-                fake_vds["pov_data"],
+                pov_data,
                 test_project_yaml["harnesses"][fake_vds["pov_harness"]]["name"],
                 sanitizer=(
                     san if fires else ""
@@ -289,13 +294,17 @@ class TestTestVDS:
 
         san = runner.workspace.project_yaml["sanitizers"][fake_vds["pou_sanitizer"]]
 
+        blob = Flatfile(contents_hash=fake_vds["pov_data_sha256"])
+        with open(blob.filename, "rb") as blobfile:
+            pov_data = blobfile.read()
+
         with mock.patch(
             "competition_api.cp_workspace.CPWorkspace.setup",
             setup,
         ), mock.patch(
             "competition_api.cp_workspace.run",
             side_effect=build_mock_run(
-                fake_vds["pov_data"],
+                pov_data,
                 test_project_yaml["harnesses"][fake_vds["pov_harness"]]["name"],
                 sanitizer=(san for san in [san, san, ""]),
                 container_name=test_project_yaml["docker_image"],
@@ -384,14 +393,23 @@ class TestTestGP:
                 fake_accepted_vds["pou_sanitizer"]
             ]
         )
+
+        blob = Flatfile(contents_hash=fake_accepted_vds["pov_data_sha256"])
+        with open(blob.filename, "rb") as blobfile:
+            pov_data = blobfile.read()
+
+        blob = Flatfile(contents_hash=fake_gp["data_sha256"])
+        with open(blob.filename, "rb") as blobfile:
+            patch = blobfile.read()
+
         with mock.patch(
             "competition_api.cp_workspace.run",
             side_effect=build_mock_run(
-                fake_accepted_vds["pov_data"],
+                pov_data,
                 test_project_yaml["harnesses"][fake_accepted_vds["pov_harness"]][
                     "name"
                 ],
-                gp_patch=fake_gp["data"],
+                gp_patch=patch,
                 sanitizer=(san for san in [san, san, ""]),
                 patch_returncode=0 if patch_builds else 1,
                 tests_returncode=0 if functional_tests_pass else 1,
@@ -482,14 +500,23 @@ class TestTestGP:
         san = runner.workspace.project_yaml["sanitizers"][
             fake_accepted_vds["pou_sanitizer"]
         ]
+
+        blob = Flatfile(contents_hash=fake_accepted_vds["pov_data_sha256"])
+        with open(blob.filename, "rb") as blobfile:
+            pov_data = blobfile.read()
+
+        blob = Flatfile(contents_hash=fake_gp["data_sha256"])
+        with open(blob.filename, "rb") as blobfile:
+            patch = blobfile.read()
+
         with mock.patch(
             "competition_api.cp_workspace.run",
             side_effect=build_mock_run(
-                fake_accepted_vds["pov_data"],
+                pov_data,
                 test_project_yaml["harnesses"][fake_accepted_vds["pov_harness"]][
                     "name"
                 ],
-                gp_patch=fake_gp["data"],
+                gp_patch=patch,
                 sanitizer=(san for san in [san, san, ""]),
                 patch_returncode=0,
                 tests_returncode=0,

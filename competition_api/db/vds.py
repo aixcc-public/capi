@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import sqlalchemy
-from sqlalchemy import LargeBinary, String, Uuid
+from sqlalchemy import String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from competition_api.db.common import Base
@@ -26,7 +26,7 @@ class VulnerabilityDiscovery(Base):
     pou_commit_sha1: Mapped[str] = mapped_column(String, nullable=False)
     pou_sanitizer: Mapped[str] = mapped_column(String, nullable=False)
     pov_harness: Mapped[str] = mapped_column(String, nullable=False)
-    pov_data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    pov_data_sha256: Mapped[str] = mapped_column(String, nullable=False)
 
     status: Mapped[FeedbackStatus] = mapped_column(
         sqlalchemy.Enum(FeedbackStatus, native_enum=False),

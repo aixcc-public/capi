@@ -23,6 +23,7 @@ from competition_api.config import init_vyper
 from competition_api.db import GeneratedPatch, Token, VulnerabilityDiscovery
 from competition_api.db.common import Base
 from competition_api.db.session import db_session
+from competition_api.flatfile import Flatfile
 from competition_api.main import app
 from competition_api.models.types import FeedbackStatus
 from tests.lib.auditor import RecordingAuditor
@@ -48,37 +49,36 @@ def test_project_yaml():
 
 
 @pytest.fixture
-def repo(test_project_yaml):
-    with tempfile.TemporaryDirectory(dir=v.get("tempdir")) as repo_dir:
-        repo_dir = pathlib.Path(repo_dir) / "cp_root"
+def repo(test_project_yaml, tmpdir):
+    repo_dir = pathlib.Path(tmpdir) / "cp_root"
 
-        v.set("cp_root", repo_dir)
+    v.set("cp_root", repo_dir)
 
-        repo_dir = repo_dir / FAKE_CP_NAME
+    repo_dir = repo_dir / FAKE_CP_NAME
 
-        project = "project.yaml"
-        repo = Repo.init(repo_dir)
+    project = "project.yaml"
+    repo = Repo.init(repo_dir)
 
-        YAML.dump(test_project_yaml, repo_dir / project)
-        repo.index.add([project])
-        repo.index.commit("initial")
+    YAML.dump(test_project_yaml, repo_dir / project)
+    repo.index.add([project])
+    repo.index.commit("initial")
 
-        cp_src_path = repo_dir / "src" / "samples"
-        os.makedirs(cp_src_path, exist_ok=True)
-        src_repo = Repo.init(cp_src_path)
-        dummy_file = os.path.join(src_repo.working_dir, "file")
+    cp_src_path = repo_dir / "src" / "samples"
+    os.makedirs(cp_src_path, exist_ok=True)
+    src_repo = Repo.init(cp_src_path)
+    dummy_file = os.path.join(src_repo.working_dir, "file")
 
-        latest = src_repo.git.head
-        for content in ["content", "more content"]:
-            with open(dummy_file, "a", encoding="utf8") as f:
-                f.write(content)
+    latest = src_repo.git.head
+    for content in ["content", "more content"]:
+        with open(dummy_file, "a", encoding="utf8") as f:
+            f.write(content)
 
-            src_repo.index.add([dummy_file])
-            latest = src_repo.index.commit("initial")
+        src_repo.index.add([dummy_file])
+        latest = src_repo.index.commit("initial")
 
-        src_repo.create_head("main", latest)
+    src_repo.create_head("main", latest)
 
-        yield repo
+    return repo
 
 
 @pytest.fixture
@@ -128,6 +128,12 @@ def db(db_config):
 
 
 @pytest.fixture(autouse=True)
+def tempdirs(tmpdir):
+    v.set("tempdir", tmpdir)
+    v.set("flatfile_dir", tmpdir)
+
+
+@pytest.fixture(autouse=True)
 def audit_sink():
     with tempfile.NamedTemporaryFile(delete_on_close=False) as auditfile:
         auditfile.close()
@@ -162,6 +168,7 @@ def _create_and_return(db, table, row):
 
 @pytest.fixture
 def fake_vds_dict(creds, fake_cp):
+    blob = Flatfile(contents=b"fake\n")
     return MappingProxyType(
         {
             "team_id": creds[0],
@@ -169,7 +176,7 @@ def fake_vds_dict(creds, fake_cp):
             "pou_commit_sha1": "b124160e9fac8952706a6f0d5d6f71c85df9e77c",
             "pou_sanitizer": "id_1",
             "pov_harness": "id_1",
-            "pov_data": b"fake\n",
+            "pov_data_sha256": blob.sha256,
         }
     )
 
@@ -182,13 +189,14 @@ def fake_vds(fake_vds_dict, db):
 
 @pytest.fixture
 def fake_accepted_vds(db, fake_cp, creds):
+    blob = Flatfile(contents=b"fake\n")
     row = {
         "team_id": creds[0],
         "cp_name": fake_cp,
         "pou_commit_sha1": "b124160e9fac8952706a6f0d5d6f71c85df9e77c",
         "pou_sanitizer": "id_1",
         "pov_harness": "id_1",
-        "pov_data": b"fake\n",
+        "pov_data_sha256": blob.sha256,
         "status": FeedbackStatus.ACCEPTED,
         "cpv_uuid": uuid4(),
     }
@@ -197,8 +205,9 @@ def fake_accepted_vds(db, fake_cp, creds):
 
 @pytest.fixture
 def fake_gp_dict(fake_accepted_vds):
+    patch = Flatfile(contents=b"fake\n")
     return MappingProxyType(
-        {"data": b"fake\n", "cpv_uuid": fake_accepted_vds["cpv_uuid"]}
+        {"data_sha256": patch.sha256, "cpv_uuid": fake_accepted_vds["cpv_uuid"]}
     )
 
 

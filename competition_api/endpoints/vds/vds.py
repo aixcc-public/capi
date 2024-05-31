@@ -1,6 +1,5 @@
 import asyncio
 import uuid
-from base64 import b64encode
 
 from aiopg.sa import SAConnection
 from fastapi import HTTPException, status
@@ -11,6 +10,7 @@ from vyper import v
 from competition_api.audit import get_auditor
 from competition_api.audit.types import EventType
 from competition_api.db import VulnerabilityDiscovery
+from competition_api.flatfile import Flatfile
 from competition_api.models.types import FeedbackStatus, UUIDPathParameter
 from competition_api.models.vds import VDSResponse, VDSStatusResponse, VDSubmission
 from competition_api.tasks import TaskRunner
@@ -33,13 +33,15 @@ async def process_vd_upload(
             vd_uuid=uuid.uuid4(),
         )
 
+    blob = Flatfile(contents=vds.pov.data)
+
     row = {
         "team_id": team_id,
         "cp_name": vds.cp_name,
         "pou_commit_sha1": vds.pou.commit_sha1,
         "pou_sanitizer": vds.pou.sanitizer,
         "pov_harness": vds.pov.harness,
-        "pov_data": vds.pov.data,
+        "pov_data_sha256": blob.sha256,
     }
 
     db_row = await db.execute(
@@ -52,7 +54,7 @@ async def process_vd_upload(
     await auditor.emit(
         EventType.VD_SUBMISSION,
         harness=db_row.pov_harness,
-        pov_blob_b64=b64encode(vds.pov.data),
+        pov_blob_sha256=blob.sha256,
         pou_commit=db_row.pou_commit_sha1.lower(),
         sanitizer=db_row.pou_sanitizer,
     )

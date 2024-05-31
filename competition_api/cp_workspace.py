@@ -9,6 +9,8 @@ from ruamel.yaml import YAML as RuamelYaml
 from structlog.stdlib import get_logger
 from vyper import v
 
+from competition_api.flatfile import Flatfile
+
 YAML = RuamelYaml(typ="safe")
 LOGGER = get_logger(__name__)
 
@@ -88,10 +90,10 @@ class CPWorkspace:
 
         LOGGER.debug("Checked out %s", self.current_commit())
 
-    async def build(self, patch: bytes | None = None) -> bool:
+    async def build(self, patch_sha256: str | None = None) -> bool:
+
         await LOGGER.adebug(
-            "Workspace: build"
-            + (f" with patch {patch.decode('utf8')}" if patch else "")
+            "Workspace: build" + (f" with patch {patch_sha256}" if patch_sha256 else "")
         )
         with open(self.workdir / ".env.project", "w+", encoding="utf8") as env:
             env.write(
@@ -101,28 +103,21 @@ class CPWorkspace:
                 f'-v {self.workdir}/.internal_only:/.internal_only"\n'
             )
 
-        if patch is None:
+        if patch_sha256 is None:
             return_code, stdout, stderr = await run(
                 "./run.sh", "build", cwd=self.workdir, env=self.run_env
             )
 
         else:
-            with tempfile.NamedTemporaryFile(
-                delete_on_close=False, dir=v.get("tempdir")
-            ) as patchfile:
-                patchfile.write(patch)
-                patchfile.close()
-
-                await LOGGER.adebug("Created patch file at %s", patchfile.name)
-
-                return_code, stdout, stderr = await run(
-                    "./run.sh",
-                    "build",
-                    patchfile.name,
-                    "samples",
-                    cwd=self.workdir,
-                    env=self.run_env,
-                )
+            patch = Flatfile(contents_hash=patch_sha256)
+            return_code, stdout, stderr = await run(
+                "./run.sh",
+                "build",
+                patch.filename,
+                "samples",
+                cwd=self.workdir,
+                env=self.run_env,
+            )
 
         return (
             return_code == 0
@@ -130,51 +125,45 @@ class CPWorkspace:
             and "Error" not in stderr.decode("utf8")
         )
 
-    async def check_sanitizers(self, blob: bytes, harness: str) -> set[str]:
+    async def check_sanitizers(self, blob_sha256: str, harness: str) -> set[str]:
+        blob = Flatfile(contents_hash=blob_sha256)
         await LOGGER.adebug(
-            "Workspace: check sanitizers on harness %s with blob (size %s)",
+            "Workspace: check sanitizers on harness %s with blob (hash %s)",
             harness,
-            len(blob),
+            blob.sha256,
         )
-        with tempfile.NamedTemporaryFile(
-            delete_on_close=False, dir=v.get("tempdir")
-        ) as blobfile:
-            blobfile.write(blob)
-            blobfile.close()
 
-            await run(
-                "./run.sh",
-                "run_pov",
-                blobfile.name,
-                self.harness(harness),
-                cwd=self.workdir,
-                env=self.run_env,
-            )
+        await run(
+            "./run.sh",
+            "run_pov",
+            blob.filename,
+            self.harness(harness),
+            cwd=self.workdir,
+            env=self.run_env,
+        )
 
-            output_dir = self.workdir / "out" / "output"
-            pov_output_path = [
-                p
-                for p in sorted(os.listdir(output_dir), reverse=True)
-                if p.endswith("run_pov")
-            ][0]
+        output_dir = self.workdir / "out" / "output"
+        pov_output_path = [
+            p
+            for p in sorted(os.listdir(output_dir), reverse=True)
+            if p.endswith("run_pov")
+        ][0]
 
-            triggered: set[str] = set()
-            for file in [
-                output_dir / pov_output_path / "stderr.log",
-                output_dir / pov_output_path / "stdout.log",
-            ]:
-                try:
-                    with open(file, "r", encoding="utf8") as f:
-                        for line in f:
-                            for key, sanitizer in self.project_yaml[
-                                "sanitizers"
-                            ].items():
-                                if sanitizer in line:
-                                    triggered.add(key)
-                except FileNotFoundError:
-                    await LOGGER.awarning("%s not found", file)
+        triggered: set[str] = set()
+        for file in [
+            output_dir / pov_output_path / "stderr.log",
+            output_dir / pov_output_path / "stdout.log",
+        ]:
+            try:
+                with open(file, "r", encoding="utf8") as f:
+                    for line in f:
+                        for key, sanitizer in self.project_yaml["sanitizers"].items():
+                            if sanitizer in line:
+                                triggered.add(key)
+            except FileNotFoundError:
+                await LOGGER.awarning("%s not found", file)
 
-            return triggered
+        return triggered
 
     async def run_functional_tests(self) -> bool:
         await LOGGER.adebug("Workspace: run tests")

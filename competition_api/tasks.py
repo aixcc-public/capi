@@ -29,14 +29,14 @@ class TaskRunner:
 
     async def _sanitizers_triggered_at(
         self,
-        pov_data: bytes,
+        pov_data_sha256: str,
         harness: str,
         commit_ref: str | None = None,
     ):
         if commit_ref:
             self.workspace.checkout(commit_ref)
         await LOGGER.adebug("Calling harness %s with POV blob", harness)
-        return await self.workspace.check_sanitizers(pov_data, harness)
+        return await self.workspace.check_sanitizers(pov_data_sha256, harness)
         # TODO: store logs as artifact
 
     async def test_vds(self, vds: VulnerabilityDiscovery):
@@ -82,7 +82,7 @@ class TaskRunner:
 
             try:
                 sanitizers = await self._sanitizers_triggered_at(
-                    vds.pov_data, vds.pov_harness, commit
+                    vds.pov_data_sha256, vds.pov_harness, commit
                 )
             except git.exc.GitCommandError:
                 await self.auditor.emit(
@@ -200,7 +200,7 @@ class TaskRunner:
         # Build with patch
         # TODO: Can't differentiate apply failure & build failure from outside ./runsh
         await LOGGER.adebug("Building GP with patch")
-        result = await self.workspace.build(patch=gp.data)
+        result = await self.workspace.build(patch_sha256=gp.data_sha256)
 
         if not result:
             await self.auditor.emit(
@@ -238,7 +238,7 @@ class TaskRunner:
 
         # Check if sanitizers fire
         triggered = vds.pou_sanitizer in await self._sanitizers_triggered_at(
-            vds.pov_data, vds.pov_harness
+            vds.pov_data_sha256, vds.pov_harness
         )
 
         if triggered:

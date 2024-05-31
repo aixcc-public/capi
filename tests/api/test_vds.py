@@ -1,14 +1,17 @@
 # pylint: disable=too-many-arguments
-
 import base64
+import os
+from hashlib import sha256
 from unittest import mock
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select, update
+from vyper import v
 
 from competition_api.audit.types import EventType
 from competition_api.db import VulnerabilityDiscovery
+from competition_api.flatfile import Flatfile
 from competition_api.models.types import FeedbackStatus
 
 
@@ -130,6 +133,9 @@ class TestVDS:
         assert len(db_row) == (1 if success else 0)
 
         if success:
+            data = base64.b64decode(body.get("pov").get("data"))
+            data_hash = sha256(data).hexdigest()
+
             db_row = db_row[0][0]
 
             assert resp["vd_uuid"] == str(db_row.id)
@@ -139,20 +145,26 @@ class TestVDS:
             assert db_row.pou_commit_sha1.lower() == body["pou"]["commit_sha1"].lower()
             assert db_row.pou_sanitizer == body["pou"]["sanitizer"]
             assert db_row.pov_harness == body["pov"]["harness"]
-            assert db_row.pov_data == base64.b64decode(body["pov"]["data"])
+            assert db_row.pov_data_sha256 == data_hash
             assert db_row.status == FeedbackStatus.PENDING
 
-        submission_evt = auditor.get_events(EventType.VD_SUBMISSION)
-        if success:
+            submission_evt = auditor.get_events(EventType.VD_SUBMISSION)
             assert submission_evt
             submission_evt = submission_evt[0]
 
             assert submission_evt.harness == body["pov"]["harness"]
-            assert submission_evt.pov_blob_b64 == body["pov"]["data"]
             assert submission_evt.pou_commit == body["pou"]["commit_sha1"]
             assert submission_evt.sanitizer == body["pou"]["sanitizer"]
+
+            assert submission_evt.pov_blob_sha256 == data_hash
+
+            with open(
+                os.path.join(v.get("flatfile_dir"), submission_evt.pov_blob_sha256),
+                "rb",
+            ) as f:
+                assert f.read() == data
         else:
-            assert not submission_evt
+            assert not auditor.get_events(EventType.VD_SUBMISSION)
 
     @staticmethod
     @pytest.mark.parametrize(
@@ -163,11 +175,13 @@ class TestVDS:
                 "pou_commit_sha1": "b124160e9fac8952706a6f0d5d6f71c85df9e77c",
                 "pou_sanitizer": "id_1",
                 "pov_harness": "id_1",
-                "pov_data": b"fake\n",
             }
         ],
     )
     def test_get(db, client, row, creds, auth_header):
+        blob = Flatfile(contents=b"fake\n")
+        row["pov_data_sha256"] = blob.sha256
+
         row["team_id"] = creds[0]
         db_row = db.execute(VulnerabilityDiscovery.insert_returning(**row))
         db_row = db_row.all()[0]

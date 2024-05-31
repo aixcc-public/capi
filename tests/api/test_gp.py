@@ -1,11 +1,13 @@
 # pylint: disable=too-many-arguments
-
 import base64
+import os
+from hashlib import sha256
 from unittest import mock
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select, update
+from vyper import v
 
 from competition_api.audit.types import EventType, GPSubmissionInvalidReason
 from competition_api.db import GeneratedPatch, VulnerabilityDiscovery
@@ -64,13 +66,14 @@ class TestGP:
         db_row = db_row[0][0]
 
         data = base64.b64decode(body["data"])
+        data_hash = sha256(data).hexdigest()
 
         if not invalid_reason:
             assert resp["gp_uuid"] == str(db_row.id)
             assert resp["status"] == FeedbackStatus.PENDING.value
             assert resp["patch_size"] == len(data)
             assert str(db_row.cpv_uuid) == body["cpv_uuid"]
-            assert db_row.data == data
+            assert db_row.data_sha256 == data_hash
             assert db_row.status == FeedbackStatus.PENDING
         else:
             assert not resp.get("gp_uuid")
@@ -79,7 +82,14 @@ class TestGP:
         assert submission_evt
         submission_evt = submission_evt[0]
 
-        assert submission_evt.patch_b64 == body["data"]
+        assert submission_evt.patch_sha256 == data_hash
+
+        with open(
+            os.path.join(v.get("flatfile_dir"), submission_evt.patch_sha256),
+            "rb",
+        ) as f:
+            assert f.read() == data
+
         assert str(submission_evt.submitted_cpv_uuid) == body["cpv_uuid"]
 
         invalid_evt = auditor.get_events(EventType.GP_SUBMISSION_INVALID)

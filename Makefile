@@ -59,7 +59,7 @@ clean-volumes:
 clean:
 	docker-compose down -v
 
-e2e: local-volumes mock-cp compose-build
+e2e: clean-volumes local-volumes mock-cp compose-build
 	:>$(HOST_CAPI_LOGS)/audit.log
 	WEB_CONCURRENCY=4 docker-compose up -d
 	cd e2e && ./run.sh; docker-compose down
