@@ -36,10 +36,10 @@ async def run(func, *args, stdin=None, **kwargs):
 
 class CPWorkspace:
     def __init__(self, cp_name):
-        self.cp = CPRegistry.instance().get(cp_name)
-
-        if self.cp is None:
+        cp = CPRegistry.instance().get(cp_name)
+        if cp is None:
             raise ValueError(f"cp_name {cp_name} does not exist")
+        self.cp = cp
 
         self.workdir = self.cp.copy()
 

@@ -57,6 +57,25 @@ class TaskRunner:
                 )
                 return
 
+        initial_commit = next(self.workspace.repo.iter_commits(reverse=True))
+        if initial_commit.parents:
+            raise RuntimeError(
+                f"CP {self.workspace.cp.name} repo assumption failed: initial commit had parents"
+            )
+
+        if vds.pou_commit_sha1 == initial_commit.hexsha:
+            await self.auditor.emit(
+                EventType.VD_SUBMISSION_INVALID,
+                reason=VDSubmissionInvalidReason.SUBMITTED_INITIAL_COMMIT,
+            )
+            async with db_session() as db:
+                await db.execute(
+                    update(VulnerabilityDiscovery)
+                    .where(VulnerabilityDiscovery.id == vds.id)
+                    .values(status=FeedbackStatus.NOT_ACCEPTED)
+                )
+            return
+
         # Validate sanitizer fires at HEAD & introducing commit and doesn't fire before
         fail_reasons: list[VDSubmissionFailReason] = []
         for fail_reason, commit, triggered_is_good in [

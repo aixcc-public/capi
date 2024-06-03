@@ -14,6 +14,7 @@ from competition_api.audit.types import (
     EventType,
     GPSubmissionFailReason,
     VDSubmissionFailReason,
+    VDSubmissionInvalidReason,
 )
 from competition_api.db import GeneratedPatch, VulnerabilityDiscovery
 from competition_api.flatfile import Flatfile
@@ -174,6 +175,11 @@ class TestTestVDS:
                 ],
                 [False, False, False],
             ),
+            (
+                EventType.VD_SUBMISSION_INVALID,
+                VDSubmissionInvalidReason.SUBMITTED_INITIAL_COMMIT,
+                [True, True, False],
+            ),
         ],
     )
     async def test_test_vds(
@@ -188,12 +194,17 @@ class TestTestVDS:
     ):
         engine = create_engine(v.get("database.url"))
         setup, src_repo = build_mock_setup(repo)
+
+        target_commit = src_repo.head.commit.hexsha
+        if fail_reason == VDSubmissionInvalidReason.SUBMITTED_INITIAL_COMMIT:
+            target_commit = next(repo.iter_commits(reverse=True)).hexsha
+
         with sessionmaker(engine, expire_on_commit=False)() as db:
             # make sure the commit sha we want to check out is in the repo
             db.execute(
                 update(VulnerabilityDiscovery)
                 .where(VulnerabilityDiscovery.id == fake_vds["id"])
-                .values(pou_commit_sha1=src_repo.head.commit.hexsha)
+                .values(pou_commit_sha1=target_commit)
             )
             vds = db.execute(
                 select(VulnerabilityDiscovery).where(
@@ -232,13 +243,16 @@ class TestTestVDS:
         assert event
         event = event[0]
 
-        success_test = not expected_event_type == EventType.VD_SUBMISSION_FAIL
+        fail_test = expected_event_type == EventType.VD_SUBMISSION_FAIL
+        invalid_test = expected_event_type == EventType.VD_SUBMISSION_INVALID
 
-        if not success_test:
+        if fail_test:
             assert event.reasons == fail_reason
+        elif invalid_test:
+            assert event.reason == fail_reason
 
         sanitizer_results = runner.auditor.get_events(EventType.VD_SANITIZER_RESULT)
-        assert len(sanitizer_results) == 3
+        assert len(sanitizer_results) == 0 if invalid_test else 3
         for fires, result in zip(sanitizer_fires, sanitizer_results):
             assert result.expected_sanitizer_triggered == fires
 
@@ -249,7 +263,7 @@ class TestTestVDS:
                 )
             ).fetchone()[0]
 
-            if success_test:
+            if not fail_test and not invalid_test:
                 assert vds.status == FeedbackStatus.ACCEPTED
                 assert vds.cpv_uuid
             else:

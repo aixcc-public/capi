@@ -25,6 +25,7 @@ class VDSubmissionInvalidReason(Enum):
     SANITIZER_NOT_FOUND = "sanitizer_not_found"
     COMMIT_CHECKOUT_FAILED = "commit_checkout_failed"
     CP_NOT_IN_CP_ROOT_FOLDER = "cp_not_in_cp_root_folder"
+    SUBMITTED_INITIAL_COMMIT = "submitted_initial_commit"
 
 
 class VDSubmissionFailReason(Enum):
