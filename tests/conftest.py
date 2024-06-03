@@ -19,6 +19,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vyper import v
 
+from competition_api import cp_registry
 from competition_api.config import init_vyper
 from competition_api.db import GeneratedPatch, Token, VulnerabilityDiscovery
 from competition_api.db.common import Base
@@ -38,6 +39,7 @@ FAKE_CP_NAME = "fakecp"
 @pytest.fixture
 def test_project_yaml():
     return {
+        "cp_name": FAKE_CP_NAME,
         "docker_image": FAKE_CP_NAME,
         "sanitizers": {
             "id_1": "BCSAN: you wrote bad code",
@@ -49,12 +51,15 @@ def test_project_yaml():
 
 
 @pytest.fixture
-def repo(test_project_yaml, tmpdir):
-    repo_dir = pathlib.Path(tmpdir) / "cp_root"
+def cp_root(tmpdir):
+    cp_root_dir = pathlib.Path(tmpdir) / "cp_root"
+    v.set("cp_root", cp_root_dir)
+    return cp_root_dir
 
-    v.set("cp_root", repo_dir)
 
-    repo_dir = repo_dir / FAKE_CP_NAME
+@pytest.fixture
+def repo(cp_root, test_project_yaml):
+    repo_dir = cp_root / FAKE_CP_NAME
 
     project = "project.yaml"
     repo = Repo.init(repo_dir)
@@ -79,6 +84,11 @@ def repo(test_project_yaml, tmpdir):
     src_repo.create_head("main", latest)
 
     return repo
+
+
+@pytest.fixture(autouse=True)
+def rebuild_cp_registry(repo):
+    cp_registry.CPRegistry.instance()._load_from_disk()  # pylint: disable=protected-access
 
 
 @pytest.fixture

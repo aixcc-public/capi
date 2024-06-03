@@ -7,6 +7,7 @@ from structlog.stdlib import get_logger
 from vyper import v
 
 from competition_api.config import init_vyper
+from competition_api.cp_registry import CPRegistry
 from competition_api.db import Token
 from competition_api.db.session import db_session
 from competition_api.endpoints import GPRouter, HealthRouter, VDSRouter
@@ -33,6 +34,9 @@ tags_metadata = [
 async def lifespan(_app: FastAPI):
     init_vyper()
     setup_logging()
+
+    # initialize cp registry
+    CPRegistry.instance()
 
     async with db_session() as db:
         await LOGGER.adebug("auth.preload: %s", v.get("auth.preload"))

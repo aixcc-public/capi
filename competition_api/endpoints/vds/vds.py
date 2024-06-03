@@ -1,5 +1,4 @@
 import asyncio
-import os
 import uuid
 
 from aiopg.sa import SAConnection
@@ -10,6 +9,7 @@ from vyper import v
 
 from competition_api.audit import get_auditor
 from competition_api.audit.types import EventType, VDSubmissionInvalidReason
+from competition_api.cp_registry import CPRegistry
 from competition_api.db import VulnerabilityDiscovery
 from competition_api.flatfile import Flatfile
 from competition_api.models.types import FeedbackStatus, UUIDPathParameter
@@ -53,7 +53,7 @@ async def process_vd_upload(
 
     auditor.push_context(cp_name=vds.cp_name, vd_uuid=db_row.id)
 
-    if not os.path.isdir(os.path.join(v.get("cp_root"), vds.cp_name)):
+    if not CPRegistry.instance().has(vds.cp_name):
         await auditor.emit(
             EventType.VD_SUBMISSION_INVALID,
             reason=VDSubmissionInvalidReason.CP_NOT_IN_CP_ROOT_FOLDER,

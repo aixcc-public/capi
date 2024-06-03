@@ -1,14 +1,12 @@
 import asyncio
 import os
-import pathlib
 import shutil
-import tempfile
 
 from git import Repo
 from ruamel.yaml import YAML as RuamelYaml
 from structlog.stdlib import get_logger
-from vyper import v
 
+from competition_api.cp_registry import CPRegistry
 from competition_api.flatfile import Flatfile
 
 YAML = RuamelYaml(typ="safe")
@@ -37,11 +35,13 @@ async def run(func, *args, stdin=None, **kwargs):
 
 
 class CPWorkspace:
-    def __init__(self, git_repo_url):
-        self.workdir = pathlib.Path(tempfile.mkdtemp(dir=v.get("tempdir")))
-        self._repo_url = git_repo_url
+    def __init__(self, cp_name):
+        self.cp = CPRegistry.instance().get(cp_name)
 
-        shutil.copytree(self._repo_url, self.workdir, dirs_exist_ok=True)
+        if self.cp is None:
+            raise ValueError(f"cp_name {cp_name} does not exist")
+
+        self.workdir = self.cp.copy()
 
         self.repo = Repo(self.workdir)
         self.src_repo = Repo(self.workdir / "src" / "samples")
