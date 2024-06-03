@@ -192,6 +192,9 @@ class TestTestVDS:
         fail_reason,
         sanitizer_fires,
     ):
+        fail_test = expected_event_type == EventType.VD_SUBMISSION_FAIL
+        invalid_test = expected_event_type == EventType.VD_SUBMISSION_INVALID
+
         engine = create_engine(v.get("database.url"))
         setup, src_repo = build_mock_setup(repo)
 
@@ -236,15 +239,22 @@ class TestTestVDS:
                 ),
                 container_name=test_project_yaml["docker_image"],
             ),
-        ):
+        ), mock.patch(
+            "competition_api.cp_workspace.CPWorkspace.checkout"
+        ) as mock_checkout:
             await runner.test_vds(vds)
+            if not invalid_test:
+                mock_checkout.assert_has_calls(
+                    [
+                        mock.call("main"),
+                        mock.call(target_commit),
+                        mock.call(f"{target_commit}~1"),
+                    ]
+                )
 
         event = runner.auditor.get_events(expected_event_type)
         assert event
         event = event[0]
-
-        fail_test = expected_event_type == EventType.VD_SUBMISSION_FAIL
-        invalid_test = expected_event_type == EventType.VD_SUBMISSION_INVALID
 
         if fail_test:
             assert event.reasons == fail_reason

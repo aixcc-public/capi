@@ -30,10 +30,7 @@ class TaskRunner:
         self,
         pov_data_sha256: str,
         harness: str,
-        commit_ref: str | None = None,
     ):
-        if commit_ref:
-            self.workspace.checkout(commit_ref)
         await LOGGER.adebug("Calling harness %s with POV blob", harness)
         return await self.workspace.check_sanitizers(pov_data_sha256, harness)
         # TODO: store logs as artifact
@@ -96,11 +93,13 @@ class TaskRunner:
             ),
         ]:
             await LOGGER.adebug("Building at %s", commit)
+            self.workspace.checkout(commit)
+
             await self.workspace.build()
 
             try:
                 sanitizers = await self._sanitizers_triggered_at(
-                    vds.pov_data_sha256, vds.pov_harness, commit
+                    vds.pov_data_sha256, vds.pov_harness
                 )
             except git.exc.GitCommandError:
                 await self.auditor.emit(
@@ -211,13 +210,12 @@ class TaskRunner:
 
         await self.workspace.setup()
 
-        self.workspace.checkout(
-            v.get(f"cp_targets.{vds.cp_name}.main_branch") or "main"
-        )
-
         # Build with patch
         # TODO: Can't differentiate apply failure & build failure from outside ./runsh
         await LOGGER.adebug("Building GP with patch")
+        self.workspace.checkout(
+            v.get(f"cp_targets.{vds.cp_name}.main_branch") or "main"
+        )
         result = await self.workspace.build(patch_sha256=gp.data_sha256)
 
         if not result:
