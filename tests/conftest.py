@@ -28,6 +28,7 @@ from competition_api.flatfile import Flatfile
 from competition_api.main import app
 from competition_api.models.types import FeedbackStatus
 from tests.lib.auditor import RecordingAuditor
+from tests.lib.patch import build_patch
 
 ENV = {"POSTGRES_PASSWORD": "secret", "POSTGRES_USER": "capi", "POSTGRES_DB": "capi"}
 
@@ -218,7 +219,7 @@ async def fake_accepted_vds(db, fake_cp, creds):
 
 @pytest.fixture
 async def fake_gp_dict(fake_accepted_vds):
-    patch = Flatfile(contents=b"fake\n")
+    patch = Flatfile(contents=build_patch().encode("utf8"))
     await patch.write()
     return MappingProxyType(
         {"data_sha256": patch.sha256, "cpv_uuid": fake_accepted_vds["cpv_uuid"]}

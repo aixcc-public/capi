@@ -15,16 +15,18 @@ class GPSubmissionInvalidReason(Enum):
 
 
 class GPSubmissionFailReason(Enum):
+    DUPLICATE_CPV_UUID = "duplicate_cpv_uuid"
+    FUNCTIONAL_TESTS_FAILED = "functional_tests_failed"
+    MALFORMED_PATCH_FILE = "malformed_patch_file"
+    PATCHED_DISALLOWED_FILE_EXTENSION = "patched_disallowed_file_extension"
     PATCH_DID_NOT_APPLY = "patch_did_not_apply"
     SANITIZER_FIRED_AFTER_PATCH = "sanitizer_fired_after_patch"
-    FUNCTIONAL_TESTS_FAILED = "functional_tests_failed"
-    DUPLICATE_CPV_UUID = "duplicate_cpv_uuid"
 
 
 class VDSubmissionInvalidReason(Enum):
-    SANITIZER_NOT_FOUND = "sanitizer_not_found"
     COMMIT_CHECKOUT_FAILED = "commit_checkout_failed"
     CP_NOT_IN_CP_ROOT_FOLDER = "cp_not_in_cp_root_folder"
+    SANITIZER_NOT_FOUND = "sanitizer_not_found"
     SUBMITTED_INITIAL_COMMIT = "submitted_initial_commit"
 
 

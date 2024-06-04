@@ -59,8 +59,9 @@ app = FastAPI(
 
 ## API Limitations
 
-* Submitted POV binary input blobs must be 2MiB or smaller, before base64
-* Submitted patch files must be 100KiB or smaller, before base64
+* Submitted POV binary input blobs must be 2MiB or smaller, before base64.
+* Submitted patch files must be 100KiB or smaller, before base64.
+* Submitted patch files may only modify .c, .h, .in, and .java files.
 """,
     terms_of_service="https://aicyberchallenge.com/terms-condition/",
     openapi_tags=tags_metadata,

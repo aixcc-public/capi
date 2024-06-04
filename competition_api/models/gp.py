@@ -14,7 +14,11 @@ KiB_100 = 102400
 class GPSubmission(BaseModel):
     cpv_uuid: UUID4
     data: Annotated[Base64Str, AfterValidator(max_size(KiB_100))] = Field(
-        description="Base64'd patch file.  Maximum allowed size is 100KiB before base64."
+        description=(
+            "Base64'd patch file.  Maximum allowed size is 100KiB before base64.  Any "
+            "modification to files not ending in .c, .h, .in, or .java will cause the "
+            "patch to be rejected."
+        )
     )
 
     model_config = {

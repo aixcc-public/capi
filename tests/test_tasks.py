@@ -20,6 +20,7 @@ from competition_api.db import GeneratedPatch, VulnerabilityDiscovery
 from competition_api.flatfile import Flatfile
 from competition_api.models.types import FeedbackStatus
 from competition_api.tasks import TaskRunner
+from tests.lib.patch import build_patch
 
 from .lib.auditor import RecordingAuditor
 
@@ -438,7 +439,6 @@ class TestTestGP:
         ):
             await runner.test_gp(gp, vds)
 
-        # TODO duplicate
         if patch_builds:
             assert runner.auditor.get_events(EventType.GP_PATCH_BUILT)
         else:
@@ -479,7 +479,17 @@ class TestTestGP:
                 assert gp.status == FeedbackStatus.NOT_ACCEPTED
 
     @staticmethod
-    async def test_test_gp_duplicate(
+    @pytest.mark.parametrize(
+        "fail_reason,patch_filename",
+        [
+            (GPSubmissionFailReason.DUPLICATE_CPV_UUID, None),
+            (GPSubmissionFailReason.PATCHED_DISALLOWED_FILE_EXTENSION, "Makefile"),
+            (GPSubmissionFailReason.PATCHED_DISALLOWED_FILE_EXTENSION, "test.py"),
+            (GPSubmissionFailReason.PATCHED_DISALLOWED_FILE_EXTENSION, "whatsit.sh"),
+            (GPSubmissionFailReason.MALFORMED_PATCH_FILE, None),
+        ],
+    )
+    async def test_test_gp_fail(
         fake_cp,
         fake_accepted_vds,
         fake_gp_dict,
@@ -487,11 +497,29 @@ class TestTestGP:
         repo,
         test_project_yaml,
         creds,
+        fail_reason,
+        patch_filename,
     ):
         engine = create_engine(v.get("database.url"))
         setup, _ = build_mock_setup(repo)
+        patch_sha256 = fake_gp["data_sha256"]
         with sessionmaker(engine, expire_on_commit=False)() as db:
-            db.execute(insert(GeneratedPatch).values(**fake_gp_dict))
+            if fail_reason == GPSubmissionFailReason.DUPLICATE_CPV_UUID:
+                db.execute(insert(GeneratedPatch).values(**fake_gp_dict))
+            elif fail_reason in [
+                GPSubmissionFailReason.PATCHED_DISALLOWED_FILE_EXTENSION,
+                GPSubmissionFailReason.MALFORMED_PATCH_FILE,
+            ]:
+                patch_content = (
+                    build_patch(file=patch_filename)
+                    if fail_reason
+                    == GPSubmissionFailReason.PATCHED_DISALLOWED_FILE_EXTENSION
+                    else "this\nis\nnot a patch\nfile"
+                )
+                blob = Flatfile(contents=patch_content.encode("utf8"))
+                await blob.write()
+                db.execute(update(GeneratedPatch).values(data_sha256=blob.sha256))
+                patch_sha256 = blob.sha256
 
             gp = db.execute(
                 select(GeneratedPatch).where(GeneratedPatch.id == fake_gp["id"])
@@ -521,7 +549,7 @@ class TestTestGP:
         pov_data = await Flatfile(
             contents_hash=fake_accepted_vds["pov_data_sha256"]
         ).read()
-        patch = await Flatfile(contents_hash=fake_gp["data_sha256"]).read()
+        patch = await Flatfile(contents_hash=patch_sha256).read()
 
         with mock.patch(
             "competition_api.cp_workspace.run",
@@ -544,7 +572,7 @@ class TestTestGP:
 
         fail = runner.auditor.get_events(EventType.GP_SUBMISSION_FAIL)
         assert fail
-        assert fail[0].reason == GPSubmissionFailReason.DUPLICATE_CPV_UUID
+        assert fail[0].reason == fail_reason
 
         with sessionmaker(engine, expire_on_commit=False)() as db:
             gp = db.execute(

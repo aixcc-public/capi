@@ -1,7 +1,9 @@
+import os
 from typing import Any
 from uuid import uuid4
 
 import git
+import whatthepatch
 from sqlalchemy import func, select, update
 from structlog.stdlib import get_logger
 from vyper import v
@@ -16,6 +18,8 @@ from competition_api.audit.types import (
 )
 from competition_api.cp_workspace import CPWorkspace
 from competition_api.db import GeneratedPatch, VulnerabilityDiscovery, db_session
+from competition_api.flatfile import Flatfile
+from competition_api.lib import peek
 from competition_api.models.types import FeedbackStatus
 
 LOGGER = get_logger(__name__)
@@ -206,6 +210,46 @@ class TaskRunner:
                     .where(GeneratedPatch.id == gp.id)
                     .values(status=FeedbackStatus.NOT_ACCEPTED)
                 )
+                return
+
+        # Verify patch only modifies allowed extensions
+        patchfile = Flatfile(contents_hash=gp.data_sha256)
+        try:
+            content = await patchfile.read()
+            if content is None:
+                raise ValueError("Patch file was empty")
+
+            wtp_diffs = whatthepatch.parse_patch(content.decode("utf8"))
+            if not (diffs := peek(wtp_diffs)):
+                raise ValueError("No diffs in patch file")
+
+        except Exception:  # pylint: disable=broad-exception-caught
+            # Catch any exceptions utf-8 decoding or parsing
+            await self.auditor.emit(
+                EventType.GP_SUBMISSION_FAIL,
+                reason=GPSubmissionFailReason.MALFORMED_PATCH_FILE,
+            )
+            async with db_session() as db:
+                await db.execute(
+                    update(GeneratedPatch)
+                    .where(GeneratedPatch.id == gp.id)
+                    .values(status=FeedbackStatus.NOT_ACCEPTED)
+                )
+            return
+
+        for diff in diffs:
+            _, extension = os.path.splitext(diff.header.old_path)
+            if extension.lower() not in [".c", ".h", ".in", ".java"]:
+                await self.auditor.emit(
+                    EventType.GP_SUBMISSION_FAIL,
+                    reason=GPSubmissionFailReason.PATCHED_DISALLOWED_FILE_EXTENSION,
+                )
+                async with db_session() as db:
+                    await db.execute(
+                        update(GeneratedPatch)
+                        .where(GeneratedPatch.id == gp.id)
+                        .values(status=FeedbackStatus.NOT_ACCEPTED)
+                    )
                 return
 
         await self.workspace.setup()
