@@ -35,8 +35,9 @@ async def lifespan(_app: FastAPI):
     init_vyper()
     setup_logging()
 
-    # initialize cp registry
-    CPRegistry.instance()
+    if not v.get_bool("mock_mode"):
+        # initialize cp registry
+        CPRegistry.instance()
 
     async with db_session() as db:
         await LOGGER.adebug("auth.preload: %s", v.get("auth.preload"))
