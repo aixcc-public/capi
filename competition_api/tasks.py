@@ -6,7 +6,6 @@ import git
 import whatthepatch
 from sqlalchemy import func, select, update
 from structlog.stdlib import get_logger
-from vyper import v
 
 from competition_api.audit import Auditor
 from competition_api.audit.types import (
@@ -82,7 +81,7 @@ class TaskRunner:
         for fail_reason, commit, triggered_is_good in [
             (
                 VDSubmissionFailReason.SANITIZER_DID_NOT_FIRE_AT_HEAD,
-                v.get(f"cp_targets.{vds.cp_name}.main_branch") or "main",
+                self.workspace.cp.ref,
                 True,
             ),
             (
@@ -257,9 +256,7 @@ class TaskRunner:
         # Build with patch
         # TODO: Can't differentiate apply failure & build failure from outside ./runsh
         await LOGGER.adebug("Building GP with patch")
-        self.workspace.checkout(
-            v.get(f"cp_targets.{vds.cp_name}.main_branch") or "main"
-        )
+        self.workspace.checkout(self.workspace.cp.ref)
         result = await self.workspace.build(patch_sha256=gp.data_sha256)
 
         if not result:

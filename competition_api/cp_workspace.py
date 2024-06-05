@@ -3,13 +3,11 @@ import os
 import shutil
 
 from git import Repo
-from ruamel.yaml import YAML as RuamelYaml
 from structlog.stdlib import get_logger
 
 from competition_api.cp_registry import CPRegistry
 from competition_api.flatfile import Flatfile
 
-YAML = RuamelYaml(typ="safe")
 LOGGER = get_logger(__name__)
 
 
@@ -41,12 +39,12 @@ class CPWorkspace:
             raise ValueError(f"cp_name {cp_name} does not exist")
         self.cp = cp
 
+        # Make working copies
         self.workdir = self.cp.copy()
+        self.project_yaml = self.cp.project_yaml
 
         self.repo = Repo(self.workdir)
         self.src_repo = Repo(self.workdir / "src" / "samples")
-
-        self.project_yaml = YAML.load(self.workdir / "project.yaml")
 
         self.run_env = {
             "DOCKER_IMAGE_NAME": self.project_yaml["docker_image"],

@@ -247,7 +247,7 @@ class TestTestVDS:
             if not invalid_test:
                 mock_checkout.assert_has_calls(
                     [
-                        mock.call("main"),
+                        mock.call(test_project_yaml["cp_sources"]["samples"]["ref"]),
                         mock.call(target_commit),
                         mock.call(f"{target_commit}~1"),
                     ]

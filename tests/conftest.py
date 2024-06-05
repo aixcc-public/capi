@@ -48,6 +48,7 @@ def test_project_yaml():
             "id_3": "uggo: bad uggo code here",
         },
         "harnesses": {"id_1": {"name": "test_harness"}},
+        "cp_sources": {"samples": {"ref": "v1.1.0"}},
     }
 
 
@@ -82,7 +83,7 @@ def repo(cp_root, test_project_yaml):
         src_repo.index.add([dummy_file])
         latest = src_repo.index.commit("initial")
 
-    src_repo.create_head("main", latest)
+    src_repo.create_head(test_project_yaml["cp_sources"]["samples"]["ref"], latest)
 
     return repo
 

@@ -20,6 +20,12 @@ class CP:
         self.root_dir = root_dir
         self._project_yaml = project_yaml
 
+        self.ref = (
+            self._project_yaml.get("cp_sources", {})
+            .get("samples", {})
+            .get("ref", "main")
+        )
+
     def copy(self) -> pathlib.Path:
         workdir = tempfile.mkdtemp(dir=v.get("tempdir"))
         shutil.copytree(self.root_dir, workdir, dirs_exist_ok=True)

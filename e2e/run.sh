@@ -18,7 +18,7 @@ echo ""
 
 echo "Submitting VDS"
 set -x
-$CURL -X POST -H "Content-Type: application/json" localhost:8082/submission/vds/ -d '{"cp_name": "Mock CP", "pou": {"commit_sha1": "451dfb089f10ae0b5afd091a428e8c501c8b9b45", "sanitizer": "id_1"}, "pov": {"harness": "id_1", "data": "YWJjZGVmYWJjZGVmYWJjZGVmYWJjZGVmYWJjZGVmYWJjZGVmCmIKCjEK"}}' >vds.json
+$CURL -X POST -H "Content-Type: application/json" localhost:8082/submission/vds/ -d '{"cp_name": "Mock CP", "pou": {"commit_sha1": "9d38fc63bb9ffbc65f976cbca45e096bad3b30e1", "sanitizer": "id_1"}, "pov": {"harness": "id_1", "data": "YWJjZGVmYWJjZGVmYWJjZGVmYWJjZGVmYWJjZGVmYWJjZGVmCmIKCjEK"}}' >vds.json
 set +x
 jq <vds.json
 echo ""
