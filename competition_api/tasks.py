@@ -57,13 +57,25 @@ class TaskRunner:
                 )
                 return
 
-        initial_commit = next(self.workspace.repo.iter_commits(reverse=True))
-        if initial_commit.parents:
-            raise RuntimeError(
-                f"CP {self.workspace.cp.name} repo assumption failed: initial commit had parents"
+        target_commit = [
+            c
+            for c in self.workspace.src_repo.iter_commits()
+            if c.hexsha == vds.pou_commit_sha1
+        ]
+        if not target_commit:
+            await self.auditor.emit(
+                EventType.VD_SUBMISSION_INVALID,
+                reason=VDSubmissionInvalidReason.COMMIT_NOT_IN_REPO,
             )
+            async with db_session() as db:
+                await db.execute(
+                    update(VulnerabilityDiscovery)
+                    .where(VulnerabilityDiscovery.id == vds.id)
+                    .values(status=FeedbackStatus.NOT_ACCEPTED)
+                )
+            return
 
-        if vds.pou_commit_sha1 == initial_commit.hexsha:
+        if not target_commit[0].parents:
             await self.auditor.emit(
                 EventType.VD_SUBMISSION_INVALID,
                 reason=VDSubmissionInvalidReason.SUBMITTED_INITIAL_COMMIT,

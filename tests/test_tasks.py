@@ -201,7 +201,9 @@ class TestTestVDS:
 
         target_commit = src_repo.head.commit.hexsha
         if fail_reason == VDSubmissionInvalidReason.SUBMITTED_INITIAL_COMMIT:
-            target_commit = next(repo.iter_commits(reverse=True)).hexsha
+            target_commit = [c for c in src_repo.iter_commits() if not c.parents][
+                0
+            ].hexsha
 
         with sessionmaker(engine, expire_on_commit=False)() as db:
             # make sure the commit sha we want to check out is in the repo

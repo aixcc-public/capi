@@ -25,6 +25,7 @@ class GPSubmissionFailReason(Enum):
 
 class VDSubmissionInvalidReason(Enum):
     COMMIT_CHECKOUT_FAILED = "commit_checkout_failed"
+    COMMIT_NOT_IN_REPO = "commit_not_in_repo"
     CP_NOT_IN_CP_ROOT_FOLDER = "cp_not_in_cp_root_folder"
     SANITIZER_NOT_FOUND = "sanitizer_not_found"
     SUBMITTED_INITIAL_COMMIT = "submitted_initial_commit"
