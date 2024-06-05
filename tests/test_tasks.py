@@ -210,7 +210,7 @@ class TestTestVDS:
             db.execute(
                 update(VulnerabilityDiscovery)
                 .where(VulnerabilityDiscovery.id == fake_vds["id"])
-                .values(pou_commit_sha1=target_commit)
+                .values(pou_commit_sha1=target_commit.upper())
             )
             vds = db.execute(
                 select(VulnerabilityDiscovery).where(
@@ -250,8 +250,8 @@ class TestTestVDS:
                 mock_checkout.assert_has_calls(
                     [
                         mock.call(test_project_yaml["cp_sources"]["samples"]["ref"]),
-                        mock.call(target_commit),
-                        mock.call(f"{target_commit}~1"),
+                        mock.call(target_commit.upper()),
+                        mock.call(f"{target_commit}~1".upper()),
                     ]
                 )
 

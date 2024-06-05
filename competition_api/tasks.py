@@ -60,7 +60,7 @@ class TaskRunner:
         target_commit = [
             c
             for c in self.workspace.src_repo.iter_commits()
-            if c.hexsha == vds.pou_commit_sha1
+            if c.hexsha.lower() == vds.pou_commit_sha1.lower()
         ]
         if not target_commit:
             await self.auditor.emit(
