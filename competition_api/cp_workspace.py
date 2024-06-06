@@ -26,9 +26,8 @@ async def run(func, *args, stdin=None, **kwargs):
     )
     return_code = proc.returncode
 
-    await LOGGER.adebug(stdout.decode("utf8"))
-    await LOGGER.adebug(stderr.decode("utf8"))
-
+    # Avoid decoding stdout and stderr
+    # Program outputs may not be decodeable when POV blobs are passed to them
     return return_code, stdout, stderr
 
 
@@ -118,8 +117,8 @@ class CPWorkspace:
 
         return (
             return_code == 0
-            and "Error" not in stdout.decode("utf8")
-            and "Error" not in stderr.decode("utf8")
+            and "Error".encode("utf8") not in stdout
+            and "Error".encode("utf8") not in stderr
         )
 
     async def check_sanitizers(self, blob_sha256: str, harness: str) -> set[str]:
