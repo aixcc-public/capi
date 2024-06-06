@@ -1,3 +1,5 @@
+# checkov:skip=CKV_DOCKER_3:We create a user for the container & drop privileges at runtime to support runtime UID remapping
+
 FROM python:3.12-slim
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -13,6 +15,7 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
         ca-certificates \
         curl \
         git \
+        gosu \
         make \
         rsync \
         ssh \
@@ -35,8 +38,7 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     apt-get clean autoclean && \
     apt-get autoremove --yes && \
     cd /var/lib && \
-    rm -rf apt dpkg cache log && \
-    useradd -m appuser
+    rm -rf apt dpkg cache log
 
 
 RUN curl -fsSL "https://github.com/mikefarah/yq/releases/download/v4.44.1/yq_linux_amd64" -o yq && \
@@ -45,15 +47,13 @@ RUN curl -fsSL "https://github.com/mikefarah/yq/releases/download/v4.44.1/yq_lin
     mv yq /usr/bin
 
 RUN mkdir /var/log/capi && \
-    chown appuser:appuser /var/log/capi && \
     chmod 755 /var/log/capi
-
-USER appuser
 
 # preinstall dependencies for faster iteration
 COPY pyproject.toml poetry.lock /code/
 WORKDIR /code
-RUN poetry install --no-root
+RUN poetry config virtualenvs.in-project true && \
+    poetry install --no-root
 
 COPY entrypoint.sh README.md /code/
 COPY competition_api /code/competition_api/
