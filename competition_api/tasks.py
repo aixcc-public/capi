@@ -57,12 +57,17 @@ class TaskRunner:
                 )
                 return
 
-        target_commit = [
-            c
-            for c in self.workspace.src_repo.iter_commits()
-            if c.hexsha.lower() == vds.pou_commit_sha1.lower()
-        ]
-        if not target_commit:
+        self.workspace.set_src_repo(vds.pou_commit_sha1)
+        commit_matches = (
+            [
+                c
+                for c in self.workspace.src_repo.iter_commits()
+                if c.hexsha.lower() == vds.pou_commit_sha1.lower()
+            ]
+            if self.workspace.src_repo
+            else []
+        )
+        if not commit_matches:
             await self.auditor.emit(
                 EventType.VD_SUBMISSION_INVALID,
                 reason=VDSubmissionInvalidReason.COMMIT_NOT_IN_REPO,
@@ -75,7 +80,7 @@ class TaskRunner:
                 )
             return
 
-        if not target_commit[0].parents:
+        if not commit_matches[0].parents:
             await self.auditor.emit(
                 EventType.VD_SUBMISSION_INVALID,
                 reason=VDSubmissionInvalidReason.SUBMITTED_INITIAL_COMMIT,
@@ -88,12 +93,16 @@ class TaskRunner:
                 )
             return
 
+        src_ref = self.workspace.cp.sources[
+            self.workspace.cp.source_from_ref(vds.pou_commit_sha1)
+        ].get("ref", "main")
+
         # Validate sanitizer fires at HEAD & introducing commit and doesn't fire before
         fail_reasons: list[VDSubmissionFailReason] = []
         for fail_reason, commit, triggered_is_good in [
             (
                 VDSubmissionFailReason.SANITIZER_DID_NOT_FIRE_AT_HEAD,
-                self.workspace.cp.ref,
+                src_ref,
                 True,
             ),
             (
@@ -268,7 +277,17 @@ class TaskRunner:
         # Build with patch
         # TODO: Can't differentiate apply failure & build failure from outside ./runsh
         await LOGGER.adebug("Building GP with patch")
-        self.workspace.checkout(self.workspace.cp.ref)
+
+        ref = self.workspace.cp.head_ref_from_ref(vds.pou_commit_sha1)
+        if ref is None:
+            # Should never happen; we've already validated this commit is part of the CP
+            raise ValueError(
+                "VDS passed tests, but by the time we tested the GP the VDS's commit "
+                "was not part of the CP"
+            )
+
+        self.workspace.set_src_repo(vds.pou_commit_sha1)
+        self.workspace.checkout(ref)
         result = await self.workspace.build(patch_sha256=gp.data_sha256)
 
         if not result:

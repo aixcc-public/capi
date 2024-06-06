@@ -6,6 +6,7 @@ from copy import deepcopy
 from threading import RLock
 from typing import Any
 
+import git
 from ruamel.yaml import YAML as RuamelYaml
 from structlog.stdlib import get_logger
 from vyper import v
@@ -15,21 +16,43 @@ LOGGER = get_logger(__name__)
 
 
 class CP:
-    def __init__(self, name, root_dir, project_yaml):
+    def __init__(self, name: str, root_dir: pathlib.Path, project_yaml: dict[str, Any]):
         self.name = name
         self.root_dir = root_dir
         self._project_yaml = project_yaml
 
-        self.ref = (
-            self._project_yaml.get("cp_sources", {})
-            .get("samples", {})
-            .get("ref", "main")
-        )
+        self.sources = self._project_yaml.get("cp_sources", {})
 
     def copy(self) -> pathlib.Path:
         workdir = tempfile.mkdtemp(dir=v.get("tempdir"))
         shutil.copytree(self.root_dir, workdir, dirs_exist_ok=True)
         return pathlib.Path(workdir)
+
+    def head_ref_from_ref(self, ref: str) -> str | None:
+        source = self.source_from_ref(ref)
+        if source is None:
+            return None
+        return self.sources[source].get("ref", "main")
+
+    def source_from_ref(self, ref: str) -> str | None:
+        if len(self.sources) == 1:
+            return list(self.sources.keys())[0]
+
+        for source in self.sources.keys():
+            repo = git.Repo(self.root_dir / "src" / source)
+            current = repo.head.commit.hexsha
+            try:
+                repo.git.checkout(ref)
+            except git.exc.GitCommandError as exc:
+                # Did we get this exception because the commit is not in this tree?
+                if "fatal: unable to read tree" not in exc.stderr:
+                    # If not, blow up
+                    raise
+            repo.git.checkout(current)
+            return source
+
+        # Ref not found in any of the sources
+        return None
 
     @property
     def project_yaml(self) -> dict[str, Any]:
@@ -67,7 +90,13 @@ class CPRegistry:
                             "project.yaml in %s missing cp_name key. Skipping it.", item
                         )
                         continue
-                    self._registry[name] = CP(name, item, project_yaml)
+                    cp = CP(name, item, project_yaml)
+                    if not cp.sources:
+                        LOGGER.warning(
+                            "project.yaml in %s has no sources.  Skipping it.", item
+                        )
+                        continue
+                    self._registry[name] = cp
                     LOGGER.info("Loaded cp %s", name)
                 else:
                     LOGGER.info(

@@ -48,7 +48,11 @@ def test_project_yaml():
             "id_3": "uggo: bad uggo code here",
         },
         "harnesses": {"id_1": {"name": "test_harness"}},
-        "cp_sources": {"samples": {"ref": "v1.1.0"}},
+        "cp_sources": {
+            "samples": {"ref": "v1.1.0"},
+            "secondary": {"ref": "v3.0.0"},
+            "tertiary": {},
+        },
     }
 
 
@@ -70,20 +74,21 @@ def repo(cp_root, test_project_yaml):
     repo.index.add([project])
     repo.index.commit("initial")
 
-    cp_src_path = repo_dir / "src" / "samples"
-    os.makedirs(cp_src_path, exist_ok=True)
-    src_repo = Repo.init(cp_src_path)
-    dummy_file = os.path.join(src_repo.working_dir, "file")
+    for source, source_info in test_project_yaml.get("cp_sources", {}).items():
+        cp_src_path = repo_dir / "src" / source
+        os.makedirs(cp_src_path, exist_ok=True)
+        src_repo = Repo.init(cp_src_path)
+        dummy_file = os.path.join(src_repo.working_dir, "file")
 
-    latest = src_repo.git.head
-    for content in ["content", "more content"]:
-        with open(dummy_file, "a", encoding="utf8") as f:
-            f.write(content)
+        latest = src_repo.git.head
+        for content in ["content", "more content"]:
+            with open(dummy_file, "a", encoding="utf8") as f:
+                f.write(content)
 
-        src_repo.index.add([dummy_file])
-        latest = src_repo.index.commit("initial")
+            src_repo.index.add([dummy_file])
+            latest = src_repo.index.commit("initial")
 
-    src_repo.create_head(test_project_yaml["cp_sources"]["samples"]["ref"], latest)
+        src_repo.create_head(source_info.get("ref", "main"), latest)
 
     return repo
 
@@ -182,6 +187,7 @@ def _create_and_return(db, table, row):
 async def fake_vds_dict(creds, fake_cp):
     blob = Flatfile(contents=b"fake\n")
     await blob.write()
+
     return MappingProxyType(
         {
             "team_id": creds[0],

@@ -43,7 +43,7 @@ class CPWorkspace:
         self.project_yaml = self.cp.project_yaml
 
         self.repo = Repo(self.workdir)
-        self.src_repo = Repo(self.workdir / "src" / "samples")
+        self.src_repo: Repo | None = None
 
         self.run_env = {
             "DOCKER_IMAGE_NAME": self.project_yaml["docker_image"],
@@ -53,15 +53,24 @@ class CPWorkspace:
     def __del__(self):
         shutil.rmtree(self.workdir)
 
+    def set_src_repo(self, ref: str):
+        source = self.cp.source_from_ref(ref)
+
+        if source is None:
+            self.src_repo = None
+            return
+
+        self.src_repo = Repo(self.workdir / "src" / source)
+
     def sanitizer(self, sanitizer_id: str) -> str | None:
         return self.project_yaml.get("sanitizers", {}).get(sanitizer_id)
 
     def harness(self, harness_id: str) -> str | None:
         return self.project_yaml.get("harnesses", {}).get(harness_id, {}).get("name")
 
-    def current_commit(self) -> str:
+    def current_commit(self) -> str | None:
         if self.src_repo is None:
-            raise NotImplementedError
+            return None
         return self.src_repo.head.commit.hexsha
 
     async def setup(self):

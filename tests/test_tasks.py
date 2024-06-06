@@ -1,6 +1,7 @@
 # pylint: disable=too-many-arguments,too-many-locals,too-many-return-statements,unused-argument
 
 import os
+from pathlib import Path
 from typing import Iterator
 from unittest import mock
 
@@ -23,16 +24,6 @@ from competition_api.tasks import TaskRunner
 from tests.lib.patch import build_patch
 
 from .lib.auditor import RecordingAuditor
-
-
-def build_mock_setup(base_repo):
-    cp_src_path = os.path.join(base_repo.working_dir, "src", "samples")
-    src_repo = Repo(cp_src_path)
-
-    async def mock_setup(self):
-        self.src_repo = src_repo
-
-    return mock_setup, src_repo
 
 
 def build_mock_run(
@@ -125,23 +116,28 @@ def build_mock_run(
 class TestTestVDS:
     @staticmethod
     @pytest.mark.parametrize(
-        "expected_event_type,fail_reason,sanitizer_fires",
+        "expected_event_type,fail_reason,sanitizer_fires,source",
         [
             (
                 EventType.VD_SUBMISSION_FAIL,
                 [VDSubmissionFailReason.SANITIZER_FIRED_BEFORE_COMMIT],
                 [True, True, True],
+                "samples",
             ),
-            (EventType.VD_SUBMISSION_SUCCESS, None, [True, True, False]),
+            (EventType.VD_SUBMISSION_SUCCESS, None, [True, True, False], "samples"),
+            (EventType.VD_SUBMISSION_SUCCESS, None, [True, True, False], "secondary"),
+            (EventType.VD_SUBMISSION_SUCCESS, None, [True, True, False], "tertiary"),
             (
                 EventType.VD_SUBMISSION_FAIL,
                 [VDSubmissionFailReason.SANITIZER_DID_NOT_FIRE_AT_COMMIT],
                 [True, False, False],
+                "samples",
             ),
             (
                 EventType.VD_SUBMISSION_FAIL,
                 [VDSubmissionFailReason.SANITIZER_DID_NOT_FIRE_AT_HEAD],
                 [False, True, False],
+                "samples",
             ),
             (
                 EventType.VD_SUBMISSION_FAIL,
@@ -151,6 +147,7 @@ class TestTestVDS:
                     VDSubmissionFailReason.SANITIZER_FIRED_BEFORE_COMMIT,
                 ],
                 [False, False, True],
+                "samples",
             ),
             (
                 EventType.VD_SUBMISSION_FAIL,
@@ -159,6 +156,7 @@ class TestTestVDS:
                     VDSubmissionFailReason.SANITIZER_FIRED_BEFORE_COMMIT,
                 ],
                 [False, True, True],
+                "samples",
             ),
             (
                 EventType.VD_SUBMISSION_FAIL,
@@ -167,6 +165,7 @@ class TestTestVDS:
                     VDSubmissionFailReason.SANITIZER_FIRED_BEFORE_COMMIT,
                 ],
                 [True, False, True],
+                "samples",
             ),
             (
                 EventType.VD_SUBMISSION_FAIL,
@@ -175,11 +174,13 @@ class TestTestVDS:
                     VDSubmissionFailReason.SANITIZER_DID_NOT_FIRE_AT_COMMIT,
                 ],
                 [False, False, False],
+                "samples",
             ),
             (
                 EventType.VD_SUBMISSION_INVALID,
                 VDSubmissionInvalidReason.SUBMITTED_INITIAL_COMMIT,
                 [True, True, False],
+                "samples",
             ),
         ],
     )
@@ -192,12 +193,14 @@ class TestTestVDS:
         expected_event_type,
         fail_reason,
         sanitizer_fires,
+        source,
     ):
         fail_test = expected_event_type == EventType.VD_SUBMISSION_FAIL
         invalid_test = expected_event_type == EventType.VD_SUBMISSION_INVALID
 
         engine = create_engine(v.get("database.url"))
-        setup, src_repo = build_mock_setup(repo)
+
+        src_repo = Repo(Path(repo.working_dir) / "src" / source)
 
         target_commit = src_repo.head.commit.hexsha
         if fail_reason == VDSubmissionInvalidReason.SUBMITTED_INITIAL_COMMIT:
@@ -230,7 +233,6 @@ class TestTestVDS:
 
         with mock.patch(
             "competition_api.cp_workspace.CPWorkspace.setup",
-            setup,
         ), mock.patch(
             "competition_api.cp_workspace.run",
             side_effect=build_mock_run(
@@ -284,16 +286,12 @@ class TestTestVDS:
                 assert vds.cpv_uuid is None
 
     @staticmethod
+    @pytest.mark.parametrize("source", ["samples", "secondary", "tertiary"])
     async def test_test_vds_duplicate(
-        fake_vds,
-        fake_vds_dict,
-        fake_cp,
-        creds,
-        test_project_yaml,
-        repo,
+        fake_vds, fake_vds_dict, fake_cp, creds, test_project_yaml, repo, source
     ):
         engine = create_engine(v.get("database.url"))
-        setup, src_repo = build_mock_setup(repo)
+        src_repo = Repo(Path(repo.working_dir) / "src" / source)
         with sessionmaker(engine, expire_on_commit=False)() as db:
             commit_sha = src_repo.head.commit.hexsha
 
@@ -323,7 +321,6 @@ class TestTestVDS:
 
         with mock.patch(
             "competition_api.cp_workspace.CPWorkspace.setup",
-            setup,
         ), mock.patch(
             "competition_api.cp_workspace.run",
             side_effect=build_mock_run(
@@ -355,16 +352,18 @@ class TestTestVDS:
 class TestTestGP:
     @staticmethod
     @pytest.mark.parametrize(
-        "patch_builds,functional_tests_pass,sanitizer_does_not_fire",
+        "patch_builds,functional_tests_pass,sanitizer_does_not_fire,source",
         [
-            (True, True, True),
-            (True, True, False),
-            (True, False, True),
-            (True, False, False),
-            (False, True, True),
-            (False, True, False),
-            (False, False, True),
-            (False, False, False),
+            (True, True, True, "samples"),
+            (True, True, True, "secondary"),
+            (True, True, True, "tertiary"),
+            (True, True, False, "samples"),
+            (True, False, True, "samples"),
+            (True, False, False, "samples"),
+            (False, True, True, "samples"),
+            (False, True, False, "samples"),
+            (False, False, True, "samples"),
+            (False, False, False, "samples"),
         ],
     )
     async def test_test_gp(
@@ -375,11 +374,12 @@ class TestTestGP:
         patch_builds,
         functional_tests_pass,
         sanitizer_does_not_fire,
+        source,
         test_project_yaml,
         creds,
     ):
         engine = create_engine(v.get("database.url"))
-        setup, src_repo = build_mock_setup(repo)
+        src_repo = Repo(Path(repo.working_dir) / "src" / source)
         with sessionmaker(engine, expire_on_commit=False)() as db:
             # make sure the commit sha we want to check out is in the repo
             db.execute(
@@ -437,7 +437,6 @@ class TestTestGP:
             ),
         ), mock.patch(
             "competition_api.cp_workspace.CPWorkspace.setup",
-            setup,
         ):
             await runner.test_gp(gp, vds)
 
@@ -503,7 +502,6 @@ class TestTestGP:
         patch_filename,
     ):
         engine = create_engine(v.get("database.url"))
-        setup, _ = build_mock_setup(repo)
         patch_sha256 = fake_gp["data_sha256"]
         with sessionmaker(engine, expire_on_commit=False)() as db:
             if fail_reason == GPSubmissionFailReason.DUPLICATE_CPV_UUID:
@@ -568,7 +566,6 @@ class TestTestGP:
             ),
         ), mock.patch(
             "competition_api.cp_workspace.CPWorkspace.setup",
-            setup,
         ):
             await runner.test_gp(gp, vds)
 
