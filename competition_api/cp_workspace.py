@@ -96,7 +96,7 @@ class CPWorkspace:
 
         LOGGER.debug("Checked out %s", self.current_commit())
 
-    async def build(self, patch_sha256: str | None = None) -> bool:
+    async def build(self, source: str, patch_sha256: str | None = None) -> bool:
         await LOGGER.adebug(
             "Workspace: build" + (f" with patch {patch_sha256}" if patch_sha256 else "")
         )
@@ -119,7 +119,7 @@ class CPWorkspace:
                 "./run.sh",
                 "build",
                 patch.filename,
-                "samples",
+                source,
                 cwd=self.workdir,
                 env=self.run_env,
             )

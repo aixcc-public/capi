@@ -45,9 +45,12 @@ class CP:
                 repo.git.checkout(ref)
             except git.exc.GitCommandError as exc:
                 # Did we get this exception because the commit is not in this tree?
-                if "fatal: unable to read tree" not in exc.stderr:
-                    # If not, blow up
-                    raise
+                if "fatal: unable to read tree" in exc.stderr:
+                    # if so, that's expected, this is just not the source repo we want
+                    continue
+                # If not, blow up
+                raise
+
             repo.git.checkout(current)
             return source
 

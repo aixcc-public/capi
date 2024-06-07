@@ -49,7 +49,7 @@ def test_project_yaml():
         },
         "harnesses": {"id_1": {"name": "test_harness"}},
         "cp_sources": {
-            "samples": {"ref": "v1.1.0"},
+            "primary": {"ref": "v1.1.0"},
             "secondary": {"ref": "v3.0.0"},
             "tertiary": {},
         },
@@ -83,7 +83,7 @@ def repo(cp_root, test_project_yaml):
         latest = src_repo.git.head
         for content in ["content", "more content"]:
             with open(dummy_file, "a", encoding="utf8") as f:
-                f.write(content)
+                f.write(f"{content} {source}")
 
             src_repo.index.add([dummy_file])
             latest = src_repo.index.commit("initial")

@@ -29,6 +29,7 @@ from .lib.auditor import RecordingAuditor
 def build_mock_run(
     pov_blob,
     pov_harness,
+    source,
     gp_patch=None,
     sanitizer: Iterator | None = None,
     patch_returncode=0,
@@ -46,8 +47,8 @@ def build_mock_run(
                             patch_file.read() == gp_patch
                         ), "Patch content did not match"
                     assert (
-                        context == "samples"
-                    ), f"context was {context}, expected samples"
+                        context == source
+                    ), f"context was {context}, expected {source}"
                     return (patch_returncode, "".encode("utf8"), "".encode("utf8"))
 
                 # make sure we're not trying to build a patch now
@@ -122,22 +123,22 @@ class TestTestVDS:
                 EventType.VD_SUBMISSION_FAIL,
                 [VDSubmissionFailReason.SANITIZER_FIRED_BEFORE_COMMIT],
                 [True, True, True],
-                "samples",
+                "primary",
             ),
-            (EventType.VD_SUBMISSION_SUCCESS, None, [True, True, False], "samples"),
+            (EventType.VD_SUBMISSION_SUCCESS, None, [True, True, False], "primary"),
             (EventType.VD_SUBMISSION_SUCCESS, None, [True, True, False], "secondary"),
             (EventType.VD_SUBMISSION_SUCCESS, None, [True, True, False], "tertiary"),
             (
                 EventType.VD_SUBMISSION_FAIL,
                 [VDSubmissionFailReason.SANITIZER_DID_NOT_FIRE_AT_COMMIT],
                 [True, False, False],
-                "samples",
+                "primary",
             ),
             (
                 EventType.VD_SUBMISSION_FAIL,
                 [VDSubmissionFailReason.SANITIZER_DID_NOT_FIRE_AT_HEAD],
                 [False, True, False],
-                "samples",
+                "primary",
             ),
             (
                 EventType.VD_SUBMISSION_FAIL,
@@ -147,7 +148,7 @@ class TestTestVDS:
                     VDSubmissionFailReason.SANITIZER_FIRED_BEFORE_COMMIT,
                 ],
                 [False, False, True],
-                "samples",
+                "primary",
             ),
             (
                 EventType.VD_SUBMISSION_FAIL,
@@ -156,7 +157,7 @@ class TestTestVDS:
                     VDSubmissionFailReason.SANITIZER_FIRED_BEFORE_COMMIT,
                 ],
                 [False, True, True],
-                "samples",
+                "primary",
             ),
             (
                 EventType.VD_SUBMISSION_FAIL,
@@ -165,7 +166,7 @@ class TestTestVDS:
                     VDSubmissionFailReason.SANITIZER_FIRED_BEFORE_COMMIT,
                 ],
                 [True, False, True],
-                "samples",
+                "primary",
             ),
             (
                 EventType.VD_SUBMISSION_FAIL,
@@ -174,13 +175,13 @@ class TestTestVDS:
                     VDSubmissionFailReason.SANITIZER_DID_NOT_FIRE_AT_COMMIT,
                 ],
                 [False, False, False],
-                "samples",
+                "primary",
             ),
             (
                 EventType.VD_SUBMISSION_INVALID,
                 VDSubmissionInvalidReason.SUBMITTED_INITIAL_COMMIT,
                 [True, True, False],
-                "samples",
+                "primary",
             ),
         ],
     )
@@ -238,6 +239,7 @@ class TestTestVDS:
             side_effect=build_mock_run(
                 pov_data,
                 test_project_yaml["harnesses"][fake_vds["pov_harness"]]["name"],
+                source,
                 sanitizer=(
                     san if fires else ""
                     for fires, san in zip(sanitizer_fires, [san, san, san])
@@ -251,7 +253,9 @@ class TestTestVDS:
             if not invalid_test:
                 mock_checkout.assert_has_calls(
                     [
-                        mock.call(test_project_yaml["cp_sources"]["samples"]["ref"]),
+                        mock.call(
+                            test_project_yaml["cp_sources"][source].get("ref", "main")
+                        ),
                         mock.call(target_commit.upper()),
                         mock.call(f"{target_commit}~1".upper()),
                     ]
@@ -286,7 +290,7 @@ class TestTestVDS:
                 assert vds.cpv_uuid is None
 
     @staticmethod
-    @pytest.mark.parametrize("source", ["samples", "secondary", "tertiary"])
+    @pytest.mark.parametrize("source", ["primary", "secondary", "tertiary"])
     async def test_test_vds_duplicate(
         fake_vds, fake_vds_dict, fake_cp, creds, test_project_yaml, repo, source
     ):
@@ -326,6 +330,7 @@ class TestTestVDS:
             side_effect=build_mock_run(
                 pov_data,
                 test_project_yaml["harnesses"][fake_vds["pov_harness"]]["name"],
+                source,
                 sanitizer=(san for san in [san, san, ""]),
                 container_name=test_project_yaml["docker_image"],
             ),
@@ -354,16 +359,16 @@ class TestTestGP:
     @pytest.mark.parametrize(
         "patch_builds,functional_tests_pass,sanitizer_does_not_fire,source",
         [
-            (True, True, True, "samples"),
+            (True, True, True, "primary"),
             (True, True, True, "secondary"),
             (True, True, True, "tertiary"),
-            (True, True, False, "samples"),
-            (True, False, True, "samples"),
-            (True, False, False, "samples"),
-            (False, True, True, "samples"),
-            (False, True, False, "samples"),
-            (False, False, True, "samples"),
-            (False, False, False, "samples"),
+            (True, True, False, "primary"),
+            (True, False, True, "primary"),
+            (True, False, False, "primary"),
+            (False, True, True, "primary"),
+            (False, True, False, "primary"),
+            (False, False, True, "primary"),
+            (False, False, False, "primary"),
         ],
     )
     async def test_test_gp(
@@ -429,6 +434,7 @@ class TestTestGP:
                 test_project_yaml["harnesses"][fake_accepted_vds["pov_harness"]][
                     "name"
                 ],
+                source,
                 gp_patch=patch,
                 sanitizer=(san for san in [san, san, ""]),
                 patch_returncode=0 if patch_builds else 1,
@@ -481,13 +487,25 @@ class TestTestGP:
 
     @staticmethod
     @pytest.mark.parametrize(
-        "fail_reason,patch_filename",
+        "fail_reason,patch_filename,source",
         [
-            (GPSubmissionFailReason.DUPLICATE_CPV_UUID, None),
-            (GPSubmissionFailReason.PATCHED_DISALLOWED_FILE_EXTENSION, "Makefile"),
-            (GPSubmissionFailReason.PATCHED_DISALLOWED_FILE_EXTENSION, "test.py"),
-            (GPSubmissionFailReason.PATCHED_DISALLOWED_FILE_EXTENSION, "whatsit.sh"),
-            (GPSubmissionFailReason.MALFORMED_PATCH_FILE, None),
+            (GPSubmissionFailReason.DUPLICATE_CPV_UUID, None, "primary"),
+            (
+                GPSubmissionFailReason.PATCHED_DISALLOWED_FILE_EXTENSION,
+                "Makefile",
+                "primary",
+            ),
+            (
+                GPSubmissionFailReason.PATCHED_DISALLOWED_FILE_EXTENSION,
+                "test.py",
+                "primary",
+            ),
+            (
+                GPSubmissionFailReason.PATCHED_DISALLOWED_FILE_EXTENSION,
+                "whatsit.sh",
+                "primary",
+            ),
+            (GPSubmissionFailReason.MALFORMED_PATCH_FILE, None, "primary"),
         ],
     )
     async def test_test_gp_fail(
@@ -500,6 +518,7 @@ class TestTestGP:
         creds,
         fail_reason,
         patch_filename,
+        source,
     ):
         engine = create_engine(v.get("database.url"))
         patch_sha256 = fake_gp["data_sha256"]
@@ -558,6 +577,7 @@ class TestTestGP:
                 test_project_yaml["harnesses"][fake_accepted_vds["pov_harness"]][
                     "name"
                 ],
+                source,
                 gp_patch=patch,
                 sanitizer=(san for san in [san, san, ""]),
                 patch_returncode=0,

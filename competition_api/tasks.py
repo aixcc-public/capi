@@ -93,9 +93,8 @@ class TaskRunner:
                 )
             return
 
-        src_ref = self.workspace.cp.sources[
-            self.workspace.cp.source_from_ref(vds.pou_commit_sha1)
-        ].get("ref", "main")
+        source = self.workspace.cp.source_from_ref(vds.pou_commit_sha1)
+        src_ref = self.workspace.cp.sources[source].get("ref", "main")
 
         # Validate sanitizer fires at HEAD & introducing commit and doesn't fire before
         fail_reasons: list[VDSubmissionFailReason] = []
@@ -119,7 +118,7 @@ class TaskRunner:
             await LOGGER.adebug("Building at %s", commit)
             self.workspace.checkout(commit)
 
-            await self.workspace.build()
+            await self.workspace.build(source)
 
             try:
                 sanitizers = await self._sanitizers_triggered_at(
@@ -258,7 +257,10 @@ class TaskRunner:
             return
 
         for diff in diffs:
-            _, extension = os.path.splitext(diff.header.old_path)
+            if not diff.header:
+                extension = "unparseable-header"
+            else:
+                _, extension = os.path.splitext(diff.header.old_path)
             if extension.lower() not in [".c", ".h", ".in", ".java"]:
                 await self.auditor.emit(
                     EventType.GP_SUBMISSION_FAIL,
@@ -288,7 +290,8 @@ class TaskRunner:
 
         self.workspace.set_src_repo(vds.pou_commit_sha1)
         self.workspace.checkout(ref)
-        result = await self.workspace.build(patch_sha256=gp.data_sha256)
+        source = self.workspace.cp.source_from_ref(vds.pou_commit_sha1)
+        result = await self.workspace.build(source, patch_sha256=gp.data_sha256)
 
         if not result:
             await self.auditor.emit(

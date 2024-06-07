@@ -55,6 +55,8 @@ disable = [
     "missing-function-docstring",
     "missing-module-docstring",
     "too-few-public-methods",
+    "too-many-locals",
+    "too-many-statements",
     "import-error", # fix specifically for superlinter
     "fixme",
     "invalid-name"
