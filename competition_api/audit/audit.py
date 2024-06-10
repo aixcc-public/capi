@@ -10,6 +10,7 @@ from .models import (
     GPFunctionalTestsPass,
     GPPatchBuiltEvent,
     GPSanitizerDidNotFire,
+    GPSubmissionDuplicateCPVEvent,
     GPSubmissionEvent,
     GPSubmissionFailEvent,
     GPSubmissionInvalidEvent,
@@ -29,6 +30,7 @@ v.set_default("audit.file", "/var/log/capi/audit.log")
 
 
 EVENTS = {
+    EventType.DUPLICATE_GP_SUBMISSION_FOR_CPV_UUID: GPSubmissionDuplicateCPVEvent,
     EventType.GP_FUNCTIONAL_TESTS_PASS: GPFunctionalTestsPass,
     EventType.GP_PATCH_BUILT: GPPatchBuiltEvent,
     EventType.GP_SANITIZER_DID_NOT_FIRE: GPSanitizerDidNotFire,

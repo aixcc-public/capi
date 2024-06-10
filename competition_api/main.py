@@ -1,7 +1,7 @@
 import os
 from contextlib import asynccontextmanager
 
-import psycopg2
+import sqlalchemy
 from fastapi import FastAPI
 from structlog.stdlib import get_logger
 from vyper import v
@@ -39,14 +39,15 @@ async def lifespan(_app: FastAPI):
         # initialize cp registry
         CPRegistry.instance()
 
-    async with db_session() as db:
         await LOGGER.adebug("auth.preload: %s", v.get("auth.preload"))
         for token_id, token in v.get("auth.preload").items():
             await LOGGER.ainfo("Preloading auth for %s", token_id)
             try:
-                await Token.create(db, token_id=token_id, token=token)
-            except psycopg2.errors.UniqueViolation:  # pylint: disable=no-member
-                await Token.update(db, token_id=token_id, token=token)
+                async with db_session() as db:
+                    await Token.create(db, token_id=token_id, token=token)
+            except sqlalchemy.exc.IntegrityError:
+                async with db_session() as db:
+                    await Token.update(db, token_id=token_id, token=token)
 
     yield
 

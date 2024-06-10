@@ -15,7 +15,6 @@ class GPSubmissionInvalidReason(Enum):
 
 
 class GPSubmissionFailReason(Enum):
-    DUPLICATE_CPV_UUID = "duplicate_cpv_uuid"
     FUNCTIONAL_TESTS_FAILED = "functional_tests_failed"
     MALFORMED_PATCH_FILE = "malformed_patch_file"
     PATCHED_DISALLOWED_FILE_EXTENSION = "patched_disallowed_file_extension"
@@ -39,6 +38,7 @@ class VDSubmissionFailReason(Enum):
 
 
 class EventType(Enum):
+    DUPLICATE_GP_SUBMISSION_FOR_CPV_UUID = "duplicate_gp_submission_for_cpv_uuid"
     GP_SUBMISSION = "gp_submission"
     GP_SUBMISSION_INVALID = "gp_submission_invalid"
     GP_SUBMISSION_FAIL = "gp_submission_failed"

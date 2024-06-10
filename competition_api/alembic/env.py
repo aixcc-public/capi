@@ -49,7 +49,7 @@ def run_migrations_online() -> None:
 
     """
 
-    connectable = create_engine(v.get("database.url"))
+    connectable = create_engine(v.get("database.synchronous_url"))
 
     with connectable.connect() as connection:
         context.configure(connection=connection, target_metadata=target_metadata)

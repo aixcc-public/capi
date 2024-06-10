@@ -1,7 +1,7 @@
 from uuid import UUID
 
-from aiopg.sa import SAConnection
 from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncConnection
 from structlog.stdlib import get_logger
 
 from competition_api.db import fastapi_get_db
@@ -19,7 +19,7 @@ LOGGER = get_logger(__name__)
 @router.post("/submission/gp/", tags=["submission"])
 async def upload_gp(
     gp: GPSubmission,
-    db: SAConnection = Depends(fastapi_get_db),
+    db: AsyncConnection = Depends(fastapi_get_db),
     team_id: UUID = Depends(get_token_id),
 ) -> GPResponse:
     return await process_gp_upload(gp, db, team_id)
@@ -28,7 +28,7 @@ async def upload_gp(
 @router.get("/submission/gp/{gp_uuid}", tags=["submission"])
 async def check_gp(
     gp_uuid: UUIDPathParameter,
-    db: SAConnection = Depends(fastapi_get_db),
+    db: AsyncConnection = Depends(fastapi_get_db),
     team_id: UUID = Depends(get_token_id),
 ) -> GPStatusResponse:
     return await get_gp_status(gp_uuid, db, team_id)

@@ -3,8 +3,8 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import argon2
-from aiopg.sa import SAConnection
 from sqlalchemy import String, Uuid, insert, select, update
+from sqlalchemy.ext.asyncio import AsyncConnection
 from sqlalchemy.orm import Mapped, mapped_column
 from structlog.stdlib import get_logger
 
@@ -25,7 +25,7 @@ class Token(Base):
 
     @classmethod
     async def create(
-        cls, db: SAConnection, token_id: UUID | None = None, token: str | None = None
+        cls, db: AsyncConnection, token_id: UUID | None = None, token: str | None = None
     ) -> tuple[UUID, str]:
         token = (
             token if token is not None else secrets.token_urlsafe(GENERATED_TOKEN_LEN)
@@ -35,14 +35,15 @@ class Token(Base):
         if token_id:
             values["id"] = token_id
 
-        db_token_id = await db.execute(insert(cls).values(**values).returning(cls.id))
-        db_token_id = await db_token_id.fetchone()
+        db_token_id = (
+            await db.execute(insert(cls).values(**values).returning(cls.id))
+        ).fetchone()
 
         return db_token_id.id, token
 
     @classmethod
     async def update(
-        cls, db: SAConnection, token_id: UUID, token: str | None = None
+        cls, db: AsyncConnection, token_id: UUID, token: str | None = None
     ) -> tuple[UUID, str]:
         token = (
             token if token is not None else secrets.token_urlsafe(GENERATED_TOKEN_LEN)
@@ -54,18 +55,19 @@ class Token(Base):
         return token_id, token
 
     @classmethod
-    async def verify(cls, db: SAConnection, token_id: UUID, token: str) -> bool:
+    async def verify(cls, db: AsyncConnection, token_id: UUID, token: str) -> bool:
         await LOGGER.adebug("Verifying token for %s", token_id)
 
-        result = await db.execute(select(cls.token).where(cls.id == token_id))
-        result = await result.fetchall()
+        result = (
+            await db.execute(select(cls.token).where(cls.id == token_id))
+        ).fetchall()
 
         if len(result) == 0:
             await LOGGER.adebug("No such id: %s", token_id)
             return False
 
         try:
-            HASHER.verify(result[0][0], token)
+            HASHER.verify(result[0].token, token)
             await LOGGER.adebug("Successful auth for %s", token_id)
             return True
         except argon2.exceptions.VerifyMismatchError:

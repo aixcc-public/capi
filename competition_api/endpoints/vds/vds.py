@@ -1,9 +1,9 @@
 import asyncio
 import uuid
 
-from aiopg.sa import SAConnection
 from fastapi import HTTPException, status
 from sqlalchemy import insert, select
+from sqlalchemy.ext.asyncio import AsyncConnection
 from structlog.stdlib import get_logger
 from vyper import v
 
@@ -21,7 +21,7 @@ LOGGER = get_logger(__name__)
 
 async def process_vd_upload(
     vds: VDSubmission,
-    db: SAConnection,
+    db: AsyncConnection,
     team_id: uuid.UUID,
 ) -> VDSResponse:
     auditor = get_auditor(team_id)
@@ -46,10 +46,14 @@ async def process_vd_upload(
         "pov_data_sha256": blob.sha256,
     }
 
-    db_row = await db.execute(
-        insert(VulnerabilityDiscovery).values(**row).returning(VulnerabilityDiscovery)
-    )
-    db_row = await db_row.fetchone()
+    db_row = (
+        await db.execute(
+            insert(VulnerabilityDiscovery)
+            .values(**row)
+            .returning(VulnerabilityDiscovery)
+        )
+    ).fetchone()[0]
+    await db.commit()
 
     auditor.push_context(cp_name=vds.cp_name, vd_uuid=db_row.id)
 
@@ -83,7 +87,7 @@ async def process_vd_upload(
 
 async def get_vd_status(
     vd_uuid: UUIDPathParameter,
-    db: SAConnection,
+    db: AsyncConnection,
     team_id: uuid.UUID,
 ) -> VDSStatusResponse:
     if v.get_bool("mock_mode"):
@@ -93,14 +97,15 @@ async def get_vd_status(
             cpv_uuid=uuid.uuid4(),
         )
 
-    result = await db.execute(
-        select(
-            VulnerabilityDiscovery.status,
-            VulnerabilityDiscovery.cpv_uuid,
-            VulnerabilityDiscovery.team_id,
-        ).where(VulnerabilityDiscovery.id == vd_uuid)
-    )
-    result = await result.fetchone()
+    result = (
+        await db.execute(
+            select(
+                VulnerabilityDiscovery.status,
+                VulnerabilityDiscovery.cpv_uuid,
+                VulnerabilityDiscovery.team_id,
+            ).where(VulnerabilityDiscovery.id == vd_uuid)
+        )
+    ).fetchone()
 
     if result is None or result.team_id != team_id:
         raise HTTPException(

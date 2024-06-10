@@ -12,8 +12,9 @@ class TestToken:
         async with db_session() as db:
             token_id, output_token = await Token.create(db, token=input_token)
 
-            db_token = await db.execute(select(Token).where(Token.id == token_id))
-            db_token = await db_token.fetchone()
+            db_token = (
+                await db.execute(select(Token).where(Token.id == token_id))
+            ).fetchone()[0]
 
             assert db_token.token, "Token was null"
             assert db_token.token != input_token, "Token was stored plaintext"

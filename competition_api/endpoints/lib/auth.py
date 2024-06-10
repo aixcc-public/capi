@@ -1,9 +1,9 @@
 from typing import Annotated
 from uuid import UUID
 
-from aiopg.sa import SAConnection
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from sqlalchemy.ext.asyncio import AsyncConnection
 from structlog.stdlib import get_logger
 
 from competition_api.db import Token, fastapi_get_db
@@ -15,7 +15,7 @@ LOGGER = get_logger(__name__)
 
 async def get_token_id(
     credentials: Annotated[HTTPBasicCredentials, Depends(auth)],
-    db: SAConnection = Depends(fastapi_get_db),
+    db: AsyncConnection = Depends(fastapi_get_db),
 ) -> UUID:
     try:
         token_id = UUID(credentials.username)

@@ -5,23 +5,14 @@ LOGGER = get_logger(__name__)
 
 
 def generate_config():
-    v.set(
-        "database.dsn",
-        (
-            f"dbname={v.get('database.name')} user={v.get('database.username')} "
-            f"password={v.get('database.password')} host={v.get('database.host')} "
-            f"port={v.get('database.port')}"
-        ),
+    url = (
+        f"{v.get('database.username')}:"
+        f"{v.get('database.password')}@"
+        f"{v.get('database.host')}:{v.get('database.port')}/"
+        f"{v.get('database.name')}"
     )
-    v.set(
-        "database.url",
-        (
-            f"postgresql+psycopg2://{v.get('database.username')}:"
-            f"{v.get('database.password')}@"
-            f"{v.get('database.host')}:{v.get('database.port')}/"
-            f"{v.get('database.name')}"
-        ),
-    )
+    v.set("database.url", f"postgresql+asyncpg://{url}")
+    v.set("database.synchronous_url", f"postgresql+psycopg2://{url}")
 
 
 def init_vyper():

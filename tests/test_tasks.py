@@ -1,15 +1,13 @@
 # pylint: disable=too-many-arguments,too-many-locals,too-many-return-statements,unused-argument
-
 import os
 from pathlib import Path
 from typing import Iterator
 from unittest import mock
+from uuid import uuid4
 
 import pytest
 from git import Repo
-from sqlalchemy import create_engine, insert, select, update
-from sqlalchemy.orm import sessionmaker
-from vyper import v
+from sqlalchemy import insert, select, update
 
 from competition_api.audit.types import (
     EventType,
@@ -17,7 +15,7 @@ from competition_api.audit.types import (
     VDSubmissionFailReason,
     VDSubmissionInvalidReason,
 )
-from competition_api.db import GeneratedPatch, VulnerabilityDiscovery
+from competition_api.db import GeneratedPatch, VulnerabilityDiscovery, db_session
 from competition_api.flatfile import Flatfile
 from competition_api.models.types import FeedbackStatus
 from competition_api.tasks import TaskRunner
@@ -199,8 +197,6 @@ class TestTestVDS:
         fail_test = expected_event_type == EventType.VD_SUBMISSION_FAIL
         invalid_test = expected_event_type == EventType.VD_SUBMISSION_INVALID
 
-        engine = create_engine(v.get("database.url"))
-
         src_repo = Repo(Path(repo.working_dir) / "src" / source)
 
         target_commit = src_repo.head.commit.hexsha
@@ -209,20 +205,20 @@ class TestTestVDS:
                 0
             ].hexsha
 
-        with sessionmaker(engine, expire_on_commit=False)() as db:
+        async with db_session() as db:
             # make sure the commit sha we want to check out is in the repo
-            db.execute(
+            await db.execute(
                 update(VulnerabilityDiscovery)
                 .where(VulnerabilityDiscovery.id == fake_vds["id"])
                 .values(pou_commit_sha1=target_commit.upper())
             )
-            vds = db.execute(
-                select(VulnerabilityDiscovery).where(
-                    VulnerabilityDiscovery.id == fake_vds["id"]
+            vds = (
+                await db.execute(
+                    select(VulnerabilityDiscovery).where(
+                        VulnerabilityDiscovery.id == fake_vds["id"]
+                    )
                 )
             ).fetchone()[0]
-
-            db.commit()
 
         auditor = RecordingAuditor(creds[0])
         auditor.push_context(vd_uuid=fake_vds["id"], cp_name=fake_vds["cp_name"])
@@ -275,10 +271,12 @@ class TestTestVDS:
         for fires, result in zip(sanitizer_fires, sanitizer_results):
             assert result.expected_sanitizer_triggered == fires
 
-        with sessionmaker(engine, expire_on_commit=False)() as db:
-            vds = db.execute(
-                select(VulnerabilityDiscovery).where(
-                    VulnerabilityDiscovery.id == fake_vds["id"]
+        async with db_session() as db:
+            vds = (
+                await db.execute(
+                    select(VulnerabilityDiscovery).where(
+                        VulnerabilityDiscovery.id == fake_vds["id"]
+                    )
                 )
             ).fetchone()[0]
 
@@ -290,30 +288,46 @@ class TestTestVDS:
                 assert vds.cpv_uuid is None
 
     @staticmethod
-    @pytest.mark.parametrize("source", ["primary", "secondary", "tertiary"])
+    @pytest.mark.parametrize(
+        "existing_success,source",
+        [
+            (True, "primary"),
+            (True, "secondary"),
+            (True, "tertiary"),
+            (False, "primary"),
+            (False, "secondary"),
+            (False, "tertiary"),
+        ],
+    )
     async def test_test_vds_duplicate(
-        fake_vds, fake_vds_dict, fake_cp, creds, test_project_yaml, repo, source
+        fake_vds,
+        fake_vds_dict,
+        fake_cp,
+        creds,
+        test_project_yaml,
+        repo,
+        existing_success,
+        source,
     ):
-        engine = create_engine(v.get("database.url"))
         src_repo = Repo(Path(repo.working_dir) / "src" / source)
-        with sessionmaker(engine, expire_on_commit=False)() as db:
+        async with db_session() as db:
             commit_sha = src_repo.head.commit.hexsha
 
-            db.execute(
-                insert(VulnerabilityDiscovery).values(
-                    **{**fake_vds_dict, "pou_commit_sha1": commit_sha}
-                )
-            )
-            vds = list(
-                db.execute(
+            existing_vds = {**fake_vds_dict}
+            existing_vds["pou_commit_sha1"] = commit_sha
+            if existing_success:
+                existing_vds["status"] = FeedbackStatus.ACCEPTED
+                existing_vds["cpv_uuid"] = str(uuid4())
+
+            await db.execute(insert(VulnerabilityDiscovery).values(**existing_vds))
+            vds = (
+                await db.execute(
                     update(VulnerabilityDiscovery)
                     .where(VulnerabilityDiscovery.id == fake_vds["id"])
                     .values(pou_commit_sha1=commit_sha)
                     .returning(VulnerabilityDiscovery)
                 )
-            )[0][0]
-
-            db.commit()
+            ).fetchone()[0]
 
         auditor = RecordingAuditor(creds[0])
         auditor.push_context(vd_uuid=fake_vds["id"], cp_name=fake_vds["cp_name"])
@@ -338,20 +352,26 @@ class TestTestVDS:
             await runner.test_vds(vds)
 
         event = runner.auditor.get_events(EventType.VD_SUBMISSION_FAIL)
-        assert event
-        event = event[0]
 
-        assert event.reasons == [VDSubmissionFailReason.DUPLICATE_COMMIT]
+        if existing_success:
+            assert event
+            event = event[0]
 
-        with sessionmaker(engine, expire_on_commit=False)() as db:
-            vds = db.execute(
-                select(VulnerabilityDiscovery).where(
-                    VulnerabilityDiscovery.id == fake_vds["id"]
-                )
-            ).fetchone()[0]
+            assert event.reasons == [VDSubmissionFailReason.DUPLICATE_COMMIT]
 
-            assert vds.status == FeedbackStatus.NOT_ACCEPTED
-            assert vds.cpv_uuid is None
+            async with db_session() as db:
+                vds = (
+                    await db.execute(
+                        select(VulnerabilityDiscovery).where(
+                            VulnerabilityDiscovery.id == fake_vds["id"]
+                        )
+                    )
+                ).fetchone()[0]
+
+                assert vds.status == FeedbackStatus.NOT_ACCEPTED
+                assert vds.cpv_uuid is None
+        else:
+            assert not event
 
 
 class TestTestGP:
@@ -383,27 +403,28 @@ class TestTestGP:
         test_project_yaml,
         creds,
     ):
-        engine = create_engine(v.get("database.url"))
         src_repo = Repo(Path(repo.working_dir) / "src" / source)
-        with sessionmaker(engine, expire_on_commit=False)() as db:
+        async with db_session() as db:
             # make sure the commit sha we want to check out is in the repo
-            db.execute(
+            await db.execute(
                 update(VulnerabilityDiscovery)
                 .where(VulnerabilityDiscovery.id == fake_accepted_vds["id"])
                 .values(pou_commit_sha1=src_repo.head.commit.hexsha)
             )
 
-            gp = db.execute(
-                select(GeneratedPatch).where(GeneratedPatch.id == fake_gp["id"])
-            ).fetchone()[0]
-
-            vds = db.execute(
-                select(VulnerabilityDiscovery).where(
-                    VulnerabilityDiscovery.id == fake_accepted_vds["id"]
+            gp = (
+                await db.execute(
+                    select(GeneratedPatch).where(GeneratedPatch.id == fake_gp["id"])
                 )
             ).fetchone()[0]
 
-            db.commit()
+            vds = (
+                await db.execute(
+                    select(VulnerabilityDiscovery).where(
+                        VulnerabilityDiscovery.id == fake_accepted_vds["id"]
+                    )
+                )
+            ).fetchone()[0]
 
         auditor = RecordingAuditor(creds[0])
         auditor.push_context(
@@ -475,9 +496,11 @@ class TestTestGP:
 
         assert runner.auditor.get_events(EventType.GP_SUBMISSION_SUCCESS)
 
-        with sessionmaker(engine, expire_on_commit=False)() as db:
-            gp = db.execute(
-                select(GeneratedPatch).where(GeneratedPatch.id == fake_gp["id"])
+        async with db_session() as db:
+            gp = (
+                await db.execute(
+                    select(GeneratedPatch).where(GeneratedPatch.id == fake_gp["id"])
+                )
             ).fetchone()[0]
 
             if all([patch_builds, functional_tests_pass, sanitizer_does_not_fire]):
@@ -486,10 +509,96 @@ class TestTestGP:
                 assert gp.status == FeedbackStatus.NOT_ACCEPTED
 
     @staticmethod
+    @pytest.mark.parametrize("source", ["primary", "secondary", "tertiary"])
+    async def test_test_gp_duplicate(
+        fake_cp,
+        fake_accepted_vds,
+        fake_gp_dict,
+        fake_gp,
+        repo,
+        test_project_yaml,
+        creds,
+        source,
+    ):
+        patch_sha256 = fake_gp["data_sha256"]
+        src_repo = Repo(Path(repo.working_dir) / "src" / source)
+        async with db_session() as db:
+            # make sure the commit sha we want to check out is in the repo
+            await db.execute(
+                update(VulnerabilityDiscovery)
+                .where(VulnerabilityDiscovery.id == fake_accepted_vds["id"])
+                .values(pou_commit_sha1=src_repo.head.commit.hexsha)
+            )
+            await db.execute(insert(GeneratedPatch).values(**fake_gp_dict))
+
+            gp = (
+                await db.execute(
+                    select(GeneratedPatch).where(GeneratedPatch.id == fake_gp["id"])
+                )
+            ).fetchone()[0]
+
+            vds = (
+                await db.execute(
+                    select(VulnerabilityDiscovery).where(
+                        VulnerabilityDiscovery.id == fake_accepted_vds["id"]
+                    )
+                )
+            ).fetchone()[0]
+
+        auditor = RecordingAuditor(creds[0])
+        auditor.push_context(
+            vd_uuid=fake_accepted_vds["id"],
+            cp_name=fake_accepted_vds["cp_name"],
+            gp_uuid=fake_gp["id"],
+            cpv_uuid=fake_accepted_vds["cpv_uuid"],
+        )
+        runner = TaskRunner(fake_cp, auditor)
+
+        san = runner.workspace.project_yaml["sanitizers"][
+            fake_accepted_vds["pou_sanitizer"]
+        ]
+
+        pov_data = await Flatfile(
+            contents_hash=fake_accepted_vds["pov_data_sha256"]
+        ).read()
+        patch = await Flatfile(contents_hash=patch_sha256).read()
+
+        with mock.patch(
+            "competition_api.cp_workspace.run",
+            side_effect=build_mock_run(
+                pov_data,
+                test_project_yaml["harnesses"][fake_accepted_vds["pov_harness"]][
+                    "name"
+                ],
+                source,
+                gp_patch=patch,
+                sanitizer=(san for san in [san, san, ""]),
+                patch_returncode=0,
+                tests_returncode=0,
+                container_name=test_project_yaml["docker_image"],
+            ),
+        ), mock.patch(
+            "competition_api.cp_workspace.CPWorkspace.setup",
+        ):
+            await runner.test_gp(gp, vds)
+
+        dupe = runner.auditor.get_events(EventType.DUPLICATE_GP_SUBMISSION_FOR_CPV_UUID)
+        assert dupe
+
+        async with db_session() as db:
+            gp = (
+                await db.execute(
+                    select(GeneratedPatch).where(GeneratedPatch.id == fake_gp["id"])
+                )
+            ).fetchone()[0]
+
+            # We don't tell the user about this type of failure
+            assert gp.status == FeedbackStatus.ACCEPTED
+
+    @staticmethod
     @pytest.mark.parametrize(
         "fail_reason,patch_filename,source",
         [
-            (GPSubmissionFailReason.DUPLICATE_CPV_UUID, None, "primary"),
             (
                 GPSubmissionFailReason.PATCHED_DISALLOWED_FILE_EXTENSION,
                 "Makefile",
@@ -520,12 +629,16 @@ class TestTestGP:
         patch_filename,
         source,
     ):
-        engine = create_engine(v.get("database.url"))
         patch_sha256 = fake_gp["data_sha256"]
-        with sessionmaker(engine, expire_on_commit=False)() as db:
-            if fail_reason == GPSubmissionFailReason.DUPLICATE_CPV_UUID:
-                db.execute(insert(GeneratedPatch).values(**fake_gp_dict))
-            elif fail_reason in [
+        src_repo = Repo(Path(repo.working_dir) / "src" / source)
+        async with db_session() as db:
+            # make sure the commit sha we want to check out is in the repo
+            await db.execute(
+                update(VulnerabilityDiscovery)
+                .where(VulnerabilityDiscovery.id == fake_accepted_vds["id"])
+                .values(pou_commit_sha1=src_repo.head.commit.hexsha)
+            )
+            if fail_reason in [
                 GPSubmissionFailReason.PATCHED_DISALLOWED_FILE_EXTENSION,
                 GPSubmissionFailReason.MALFORMED_PATCH_FILE,
             ]:
@@ -537,20 +650,22 @@ class TestTestGP:
                 )
                 blob = Flatfile(contents=patch_content.encode("utf8"))
                 await blob.write()
-                db.execute(update(GeneratedPatch).values(data_sha256=blob.sha256))
+                await db.execute(update(GeneratedPatch).values(data_sha256=blob.sha256))
                 patch_sha256 = blob.sha256
 
-            gp = db.execute(
-                select(GeneratedPatch).where(GeneratedPatch.id == fake_gp["id"])
-            ).fetchone()[0]
-
-            vds = db.execute(
-                select(VulnerabilityDiscovery).where(
-                    VulnerabilityDiscovery.id == fake_accepted_vds["id"]
+            gp = (
+                await db.execute(
+                    select(GeneratedPatch).where(GeneratedPatch.id == fake_gp["id"])
                 )
             ).fetchone()[0]
 
-            db.commit()
+            vds = (
+                await db.execute(
+                    select(VulnerabilityDiscovery).where(
+                        VulnerabilityDiscovery.id == fake_accepted_vds["id"]
+                    )
+                )
+            ).fetchone()[0]
 
         auditor = RecordingAuditor(creds[0])
         auditor.push_context(
@@ -593,9 +708,11 @@ class TestTestGP:
         assert fail
         assert fail[0].reason == fail_reason
 
-        with sessionmaker(engine, expire_on_commit=False)() as db:
-            gp = db.execute(
-                select(GeneratedPatch).where(GeneratedPatch.id == fake_gp["id"])
+        async with db_session() as db:
+            gp = (
+                await db.execute(
+                    select(GeneratedPatch).where(GeneratedPatch.id == fake_gp["id"])
+                )
             ).fetchone()[0]
 
             assert gp.status == FeedbackStatus.NOT_ACCEPTED

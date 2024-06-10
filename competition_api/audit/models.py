@@ -47,6 +47,10 @@ class GPEvent(BaseModel):
     cpv_uuid: UUID
 
 
+class GPSubmissionDuplicateCPVEvent(GPEvent):
+    """A CRS submitted another GP for a CPV they've already submitted for"""
+
+
 class GPPatchBuiltEvent(GPEvent):
     """A CP was built successfully with a patch"""
 
@@ -150,6 +154,7 @@ class EventWrapper(BaseModel):
         GPFunctionalTestsPass,
         GPPatchBuiltEvent,
         GPSanitizerDidNotFire,
+        GPSubmissionDuplicateCPVEvent,
         GPSubmissionEvent,
         GPSubmissionFailEvent,
         GPSubmissionInvalidEvent,

@@ -1,17 +1,20 @@
 from contextlib import asynccontextmanager
 
-from aiopg.sa import create_engine
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
 from vyper import v
 
 
 @asynccontextmanager
 async def db_session():
-    async with create_engine(dsn=v.get("database.dsn")) as engine:
-        async with engine.acquire() as db:
-            try:
-                yield db
-            finally:
-                await db.close()
+    engine = create_async_engine(url=v.get("database.url"))
+    session = sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)()
+    try:
+        session.begin_nested()  # this automatically rolls back on exception
+        yield session
+        await session.commit()
+    finally:
+        await session.close()
 
 
 async def fastapi_get_db():

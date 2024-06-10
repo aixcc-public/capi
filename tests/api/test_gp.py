@@ -10,7 +10,7 @@ from sqlalchemy import select, update
 from vyper import v
 
 from competition_api.audit.types import EventType, GPSubmissionInvalidReason
-from competition_api.db import GeneratedPatch, VulnerabilityDiscovery
+from competition_api.db import GeneratedPatch, VulnerabilityDiscovery, db_session
 from competition_api.models.types import FeedbackStatus
 
 
@@ -25,8 +25,7 @@ class TestGP:
             ({"data": "ZmFrZQo="}, GPSubmissionInvalidReason.VDS_WAS_FROM_ANOTHER_TEAM),
         ],
     )
-    def test_post(
-        db,
+    async def test_post(
         client,
         body,
         invalid_reason,
@@ -42,12 +41,14 @@ class TestGP:
         )
 
         if invalid_reason == GPSubmissionInvalidReason.VDS_WAS_FROM_ANOTHER_TEAM:
-            db.execute(
-                update(VulnerabilityDiscovery)
-                .where(VulnerabilityDiscovery.cpv_uuid == fake_accepted_vds["cpv_uuid"])
-                .values(team_id=uuid4())
-            )
-            db.commit()
+            async with db_session() as db:
+                await db.execute(
+                    update(VulnerabilityDiscovery)
+                    .where(
+                        VulnerabilityDiscovery.cpv_uuid == fake_accepted_vds["cpv_uuid"]
+                    )
+                    .values(team_id=uuid4())
+                )
 
         with mock.patch(
             "competition_api.endpoints.gp.gp.TaskRunner", autospec=True
@@ -61,7 +62,8 @@ class TestGP:
 
         resp = resp.json()
 
-        db_row = db.execute(select(GeneratedPatch)).fetchall()
+        async with db_session() as db:
+            db_row = (await db.execute(select(GeneratedPatch))).fetchall()
         assert len(db_row) == 1
         db_row = db_row[0][0]
 
@@ -148,13 +150,13 @@ class TestGP:
         assert resp["gp_uuid"] == str(fake_gp["id"])
 
     @staticmethod
-    def test_get_other_team(db, client, fake_gp, auth_header):
-        db.execute(
-            update(VulnerabilityDiscovery)
-            .where(VulnerabilityDiscovery.cpv_uuid == fake_gp["cpv_uuid"])
-            .values(team_id=uuid4())
-        )
-        db.commit()
+    async def test_get_other_team(client, fake_gp, auth_header):
+        async with db_session() as db:
+            await db.execute(
+                update(VulnerabilityDiscovery)
+                .where(VulnerabilityDiscovery.cpv_uuid == fake_gp["cpv_uuid"])
+                .values(team_id=uuid4())
+            )
 
         resp = client.get(f"/submission/gp/{str(fake_gp['id'])}", headers=auth_header)
 

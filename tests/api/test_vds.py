@@ -11,7 +11,7 @@ from sqlalchemy import select, update
 from vyper import v
 
 from competition_api.audit.types import EventType
-from competition_api.db import VulnerabilityDiscovery
+from competition_api.db import VulnerabilityDiscovery, db_session
 from competition_api.flatfile import Flatfile
 from competition_api.models.types import FeedbackStatus
 from tests.conftest import FAKE_CP_NAME
@@ -129,8 +129,8 @@ class TestVDS:
             ),
         ],
     )
-    def test_post(
-        db, client, body, return_code, auth_header, mock_get_auditor, auditor, repo
+    async def test_post(
+        client, body, return_code, auth_header, mock_get_auditor, auditor, repo
     ):
         with mock.patch(
             "competition_api.endpoints.vds.vds.TaskRunner", autospec=True
@@ -145,7 +145,8 @@ class TestVDS:
 
         resp = resp.json()
 
-        db_row = db.execute(select(VulnerabilityDiscovery)).fetchall()
+        async with db_session() as db:
+            db_row = (await db.execute(select(VulnerabilityDiscovery))).fetchall()
         assert len(db_row) == (
             1 if success or body.get("cp_name") == "not-a-real-cp" else 0
         )
@@ -196,16 +197,16 @@ class TestVDS:
             }
         ],
     )
-    async def test_get(db, client, row, creds, auth_header):
+    async def test_get(client, row, creds, auth_header):
         blob = Flatfile(contents=b"fake\n")
         await blob.write()
 
         row["pov_data_sha256"] = blob.sha256
 
         row["team_id"] = creds[0]
-        db_row = db.execute(VulnerabilityDiscovery.insert_returning(**row))
+        async with db_session() as db:
+            db_row = await db.execute(VulnerabilityDiscovery.insert_returning(**row))
         db_row = db_row.all()[0]
-        db.commit()
 
         resp = client.get(f"/submission/vds/{str(db_row.id)}", headers=auth_header)
 
@@ -217,13 +218,13 @@ class TestVDS:
         assert resp["vd_uuid"] == str(db_row.id)
 
     @staticmethod
-    def test_get_other_team(db, client, fake_vds, auth_header):
-        db.execute(
-            update(VulnerabilityDiscovery)
-            .where(VulnerabilityDiscovery.id == fake_vds["id"])
-            .values(team_id=uuid4())
-        )
-        db.commit()
+    async def test_get_other_team(client, fake_vds, auth_header):
+        async with db_session() as db:
+            await db.execute(
+                update(VulnerabilityDiscovery)
+                .where(VulnerabilityDiscovery.id == fake_vds["id"])
+                .values(team_id=uuid4())
+            )
 
         resp = client.get(f"/submission/vds/{str(fake_vds['id'])}", headers=auth_header)
 

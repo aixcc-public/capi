@@ -15,8 +15,7 @@ from git import Repo
 from pytest_asyncio import is_async_test
 from pytest_docker_tools import container
 from ruamel.yaml import YAML as RuamelYaml
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine
 from vyper import v
 
 from competition_api import cp_registry
@@ -120,7 +119,7 @@ db_container = container(  # pylint: disable=no-value-for-parameter
 
 
 @pytest.fixture(autouse=True)
-def db_config(db_container):
+async def db_config(db_container):
     v.set("database.password", ENV["POSTGRES_PASSWORD"])
     v.set("database.username", ENV["POSTGRES_USER"])
     v.set("database.name", ENV["POSTGRES_DB"])
@@ -131,17 +130,14 @@ def db_config(db_container):
 
     init_vyper()
 
-    engine = create_engine(v.get("database.url"))
-    Base.metadata.create_all(bind=engine)
+    engine = create_async_engine(url=v.get("database.url"))
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
     yield
-    Base.metadata.drop_all(bind=engine)
 
-
-@pytest.fixture
-def db(db_config):
-    engine = create_engine(v.get("database.url"))
-    with sessionmaker(engine)() as session:
-        yield session
+    async with create_async_engine(url=v.get("database.url")).begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
 
 
 @pytest.fixture(autouse=True)
@@ -161,9 +157,9 @@ def audit_sink():
 
 
 @pytest.fixture
-async def creds():
+async def creds(db_config):
     async with db_session() as db:
-        yield await Token.create(db)
+        return await Token.create(db)
 
 
 @pytest.fixture
@@ -172,10 +168,8 @@ def auth_header(creds):
     return {"Authorization": f"Basic {creds}"}
 
 
-def _create_and_return(db, table, row):
-    db_row = db.execute(table.insert_returning(**row))
-    db_row = db_row.all()[0]
-    db.commit()
+async def _create_and_return(db, table, row):
+    db_row = (await db.execute(table.insert_returning(**row))).fetchone()
 
     row["status"] = db_row.status.value
     row["id"] = str(db_row.id)
@@ -201,13 +195,14 @@ async def fake_vds_dict(creds, fake_cp):
 
 
 @pytest.fixture
-def fake_vds(fake_vds_dict, db):
+async def fake_vds(fake_vds_dict):
     fake_vds_dict = {**fake_vds_dict}
-    return _create_and_return(db, VulnerabilityDiscovery, fake_vds_dict)
+    async with db_session() as db:
+        return await _create_and_return(db, VulnerabilityDiscovery, fake_vds_dict)
 
 
 @pytest.fixture
-async def fake_accepted_vds(db, fake_cp, creds):
+async def fake_accepted_vds(fake_cp, creds):
     blob = Flatfile(contents=b"fake\n")
     await blob.write()
 
@@ -221,7 +216,8 @@ async def fake_accepted_vds(db, fake_cp, creds):
         "status": FeedbackStatus.ACCEPTED,
         "cpv_uuid": uuid4(),
     }
-    return _create_and_return(db, VulnerabilityDiscovery, row)
+    async with db_session() as db:
+        return await _create_and_return(db, VulnerabilityDiscovery, row)
 
 
 @pytest.fixture
@@ -234,9 +230,10 @@ async def fake_gp_dict(fake_accepted_vds):
 
 
 @pytest.fixture
-def fake_gp(fake_gp_dict, db):
+async def fake_gp(fake_gp_dict):
     fake_gp_dict = {**fake_gp_dict}
-    return _create_and_return(db, GeneratedPatch, fake_gp_dict)
+    async with db_session() as db:
+        return await _create_and_return(db, GeneratedPatch, fake_gp_dict)
 
 
 def pytest_collection_modifyitems(items):
