@@ -14,7 +14,7 @@ if [[ "${LOCAL_USER}" != "0:0" ]]; then
 	groupadd -o -g "${LOCAL_USER_GID}" appuser 2>/dev/null
 	useradd -o -m -g "${LOCAL_USER_GID}" -u "${LOCAL_USER_ID}" -d /home/appuser appuser 2>/dev/null
 
-	chown -R appuser:appuser /code /home/appuser /var/log/capi
+	chown -R appuser:appuser /home/appuser /var/log/capi
 
 	export HOME=/home/appuser
 	BASH="gosu appuser bash"
