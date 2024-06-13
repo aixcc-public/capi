@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import HTTPException, status
 from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import AsyncConnection
+from structlog.contextvars import bind_contextvars, clear_contextvars
 from structlog.stdlib import get_logger
 from vyper import v
 
@@ -22,7 +23,10 @@ LOGGER = get_logger(__name__)
 async def process_gp_upload(
     gp: GPSubmission, db: AsyncConnection, team_id: UUID
 ) -> GPResponse:
+    clear_contextvars()
     auditor = get_auditor(team_id)
+
+    bind_contextvars(team_id=str(team_id), endpoint="GP upload")
 
     if v.get_bool("mock_mode"):
         await auditor.emit(EventType.MOCK_RESPONSE)
@@ -37,6 +41,7 @@ async def process_gp_upload(
 
     patch = Flatfile(contents=gp.data.encode("utf8"))
     await patch.write()
+    bind_contextvars(patch_size=len(gp.data), patch_sha256=patch.sha256)
 
     row["data_sha256"] = patch.sha256
 
@@ -49,7 +54,8 @@ async def process_gp_upload(
         raise RuntimeError("No value returned on GeneratedPatch database insert")
     gp_row = gp_row[0]
 
-    auditor.push_context(gp_uuid=gp_row.id)
+    for update_context in [bind_contextvars, auditor.push_context]:
+        update_context(gp_uuid=str(gp_row.id))
     await auditor.emit(
         EventType.GP_SUBMISSION,
         submitted_cpv_uuid=gp.cpv_uuid,
@@ -88,7 +94,10 @@ async def process_gp_upload(
     vds = vds[0][0]
 
     # Now that we have a VDS, add it to our audit context and DB row
-    auditor.push_context(cp_name=vds.cp_name, vd_uuid=vds.id, cpv_uuid=gp.cpv_uuid)
+    for update_context in [bind_contextvars, auditor.push_context]:
+        update_context(
+            cp_name=vds.cp_name, vd_uuid=str(vds.id), cpv_uuid=str(gp.cpv_uuid)
+        )
     await db.execute(
         update(GeneratedPatch)
         .where(GeneratedPatch.id == gp_row.id)

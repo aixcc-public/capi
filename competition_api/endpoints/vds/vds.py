@@ -4,6 +4,7 @@ import uuid
 from fastapi import HTTPException, status
 from sqlalchemy import insert, select
 from sqlalchemy.ext.asyncio import AsyncConnection
+from structlog.contextvars import bind_contextvars, clear_contextvars
 from structlog.stdlib import get_logger
 from vyper import v
 
@@ -24,7 +25,11 @@ async def process_vd_upload(
     db: AsyncConnection,
     team_id: uuid.UUID,
 ) -> VDSResponse:
+    clear_contextvars()
     auditor = get_auditor(team_id)
+
+    bind_contextvars(team_id=str(team_id), cp_name=vds.cp_name, endpoint="VDS upload")
+    auditor.push_context(cp_name=vds.cp_name)
 
     if v.get_bool("mock_mode"):
         await auditor.emit(EventType.MOCK_RESPONSE)
@@ -36,6 +41,7 @@ async def process_vd_upload(
 
     blob = Flatfile(contents=vds.pov.data)
     await blob.write()
+    bind_contextvars(vds_blob_size=len(vds.pov.data), vds_blob_sha256=blob.sha256)
 
     row = {
         "team_id": team_id,
@@ -61,7 +67,8 @@ async def process_vd_upload(
         )
     db_row = db_row[0]
 
-    auditor.push_context(cp_name=vds.cp_name, vd_uuid=db_row.id)
+    for update_context in [bind_contextvars, auditor.push_context]:
+        update_context(vd_uuid=str(db_row.id))
 
     if not CPRegistry.instance().has(vds.cp_name):
         await auditor.emit(
