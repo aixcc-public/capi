@@ -52,8 +52,14 @@ async def process_vd_upload(
             .values(**row)
             .returning(VulnerabilityDiscovery)
         )
-    ).fetchone()[0]
+    ).fetchone()
     await db.commit()
+
+    if db_row is None:
+        raise RuntimeError(
+            "No value returned on VulnerabilityDiscovery database insert"
+        )
+    db_row = db_row[0]
 
     auditor.push_context(cp_name=vds.cp_name, vd_uuid=db_row.id)
 

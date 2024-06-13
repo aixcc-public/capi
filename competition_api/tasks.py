@@ -62,17 +62,7 @@ class TaskRunner:
                     )
                     return
 
-                self.workspace.set_src_repo(vds.pou_commit_sha1)
-                commit_matches = (
-                    [
-                        c
-                        for c in self.workspace.src_repo.iter_commits()
-                        if c.hexsha.lower() == vds.pou_commit_sha1.lower()
-                    ]
-                    if self.workspace.src_repo
-                    else []
-                )
-                if not commit_matches:
+                if not self.workspace.cp.has(vds.pou_commit_sha1):
                     await self.auditor.emit(
                         EventType.VD_SUBMISSION_INVALID,
                         reason=VDSubmissionInvalidReason.COMMIT_NOT_IN_REPO,
@@ -83,8 +73,9 @@ class TaskRunner:
                         .values(status=FeedbackStatus.NOT_ACCEPTED)
                     )
                     return
+                self.workspace.set_src_repo(vds.pou_commit_sha1)
 
-                if not commit_matches[0].parents:
+                if self.workspace.cp.is_initial_commit(vds.pou_commit_sha1):
                     await self.auditor.emit(
                         EventType.VD_SUBMISSION_INVALID,
                         reason=VDSubmissionInvalidReason.SUBMITTED_INITIAL_COMMIT,

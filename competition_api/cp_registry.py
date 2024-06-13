@@ -15,6 +15,36 @@ YAML = RuamelYaml(typ="safe")
 LOGGER = get_logger(__name__)
 
 
+class SourceCommitMap:
+    def __init__(self, workdir: pathlib.Path, source: str):
+        repo = git.Repo(workdir / "src" / source)
+
+        self.commit_hashes: set[str] = set()
+        self.commits: set[git.Commit] = set()
+
+        self.initial_commit: str | None = None
+
+        for commit in repo.iter_commits():
+            self.commit_hashes.add(commit.hexsha.lower())
+            self.commits.add(commit)
+
+            if not commit.parents:
+                if self.initial_commit is not None:
+                    raise ValueError(
+                        f"Found another parentless commit in source {source} for CP in {workdir}:"
+                        f" had {self.initial_commit}, found {commit.hexsha.lower()}"
+                    )
+                self.initial_commit = commit.hexsha.lower()
+
+        if self.initial_commit is None:
+            raise ValueError(
+                f"Source {source} for CP in {workdir} does not have a commit with no parents"
+            )
+
+    def has(self, commit_sha: str):
+        return commit_sha.lower() in self.commit_hashes
+
+
 class CP:
     def __init__(self, name: str, root_dir: pathlib.Path, project_yaml: dict[str, Any]):
         self.name = name
@@ -22,11 +52,31 @@ class CP:
         self._project_yaml = project_yaml
 
         self.sources = self._project_yaml.get("cp_sources", {})
+        self.source_commits: dict[str, SourceCommitMap] = {}
+
+        self.commits = {
+            source: SourceCommitMap(self.root_dir, source)
+            for source in self.sources.keys()
+        }
 
     def copy(self) -> pathlib.Path:
         workdir = tempfile.mkdtemp(dir=v.get("tempdir"))
         shutil.copytree(self.root_dir, workdir, dirs_exist_ok=True)
         return pathlib.Path(workdir)
+
+    def is_initial_commit(self, ref: str) -> bool:
+        return any(
+            ref.lower() == commit_map.initial_commit
+            for commit_map in self.commits.values()
+        )
+
+    def source_from_ref(self, ref: str) -> str | None:
+        for source, commit_map in self.commits.items():
+            if commit_map.has(ref):
+                return source
+
+        # Ref not found in any of the sources
+        return None
 
     def head_ref_from_ref(self, ref: str) -> str | None:
         source = self.source_from_ref(ref)
@@ -34,28 +84,8 @@ class CP:
             return None
         return self.sources[source].get("ref", "main")
 
-    def source_from_ref(self, ref: str) -> str | None:
-        if len(self.sources) == 1:
-            return list(self.sources.keys())[0]
-
-        for source in self.sources.keys():
-            repo = git.Repo(self.root_dir / "src" / source)
-            current = repo.head.commit.hexsha
-            try:
-                repo.git.checkout(ref)
-            except git.exc.GitCommandError as exc:
-                # Did we get this exception because the commit is not in this tree?
-                if "fatal: unable to read tree" in exc.stderr:
-                    # if so, that's expected, this is just not the source repo we want
-                    continue
-                # If not, blow up
-                raise
-
-            repo.git.checkout(current)
-            return source
-
-        # Ref not found in any of the sources
-        return None
+    def has(self, ref: str) -> bool:
+        return self.source_from_ref(ref) is not None
 
     @property
     def project_yaml(self) -> dict[str, Any]:

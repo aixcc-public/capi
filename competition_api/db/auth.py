@@ -39,6 +39,9 @@ class Token(Base):
             await db.execute(insert(cls).values(**values).returning(cls.id))
         ).fetchone()
 
+        if db_token_id is None:
+            raise RuntimeError("No value returned on Token database insert")
+
         return db_token_id.id, token
 
     @classmethod

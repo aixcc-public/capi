@@ -26,8 +26,10 @@ async def run(func, *args, stdin=None, **kwargs):
     )
     return_code = proc.returncode
 
-    # Avoid decoding stdout and stderr
     # Program outputs may not be decodeable when POV blobs are passed to them
+    await LOGGER.adebug("Process stdout: %s", stdout.decode("utf8", errors="ignore"))
+    await LOGGER.adebug("Process stderr: %s", stderr.decode("utf8", errors="ignore"))
+
     return return_code, stdout, stderr
 
 
@@ -148,6 +150,7 @@ class CPWorkspace:
         )
 
         output_dir = self.workdir / "out" / "output"
+
         pov_output_path = [
             p
             for p in sorted(os.listdir(output_dir), reverse=True)

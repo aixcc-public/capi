@@ -3,6 +3,7 @@ ROOT_DIR=$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 
 # variables that control the volumes
 HOST_CAPI_LOGS = $(ROOT_DIR)/capi_logs
+export AUDIT_LOG = $(HOST_CAPI_LOGS)/audit.log
 
 # variables the control the CP repos
 HOST_CP_ROOT_DIR = $(ROOT_DIR)/cp_root
@@ -48,6 +49,11 @@ up: local-volumes mock-cp compose-build
 down:
 	docker-compose down
 
+jenkins-cp: local-volumes
+	rm -rf $(HOST_CP_ROOT_DIR)/$@
+	git clone git@github.com:aixcc-sc/challenge-002-jenkins-cp.git $(HOST_CP_ROOT_DIR)/$@
+	cd $(HOST_CP_ROOT_DIR)/$@ && make cpsrc-prepare
+
 mock-cp: local-volumes
 	rm -rf $(HOST_CP_ROOT_DIR)/$@
 	git clone git@github.com:aixcc-sc/mock-cp.git $(HOST_CP_ROOT_DIR)/$@
@@ -59,8 +65,8 @@ clean-volumes:
 clean:
 	docker-compose down -v
 
-e2e: clean-volumes local-volumes mock-cp compose-build
-	:>$(HOST_CAPI_LOGS)/audit.log
+e2e: clean clean-volumes local-volumes mock-cp compose-build
+	:>$(AUDIT_LOG)
 	WEB_CONCURRENCY=4 docker-compose up -d
 	cd e2e && ./run.sh; docker-compose down
-	cat $(HOST_CAPI_LOGS)/audit.log
+	cat $(AUDIT_LOG)

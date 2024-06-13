@@ -124,7 +124,12 @@ class TestTestVDS:
                 "primary",
             ),
             (EventType.VD_SUBMISSION_SUCCESS, None, [True, True, False], "primary"),
-            (EventType.VD_SUBMISSION_SUCCESS, None, [True, True, False], "secondary"),
+            (
+                EventType.VD_SUBMISSION_SUCCESS,
+                None,
+                [True, True, False],
+                "secondary/nested-folder",
+            ),
             (EventType.VD_SUBMISSION_SUCCESS, None, [True, True, False], "tertiary"),
             (
                 EventType.VD_SUBMISSION_FAIL,
@@ -292,10 +297,10 @@ class TestTestVDS:
         "existing_success,source",
         [
             (True, "primary"),
-            (True, "secondary"),
+            (True, "secondary/nested-folder"),
             (True, "tertiary"),
             (False, "primary"),
-            (False, "secondary"),
+            (False, "secondary/nested-folder"),
             (False, "tertiary"),
         ],
     )
@@ -380,7 +385,7 @@ class TestTestGP:
         "patch_builds,functional_tests_pass,sanitizer_does_not_fire,source",
         [
             (True, True, True, "primary"),
-            (True, True, True, "secondary"),
+            (True, True, True, "secondary/nested-folder"),
             (True, True, True, "tertiary"),
             (True, True, False, "primary"),
             (True, False, True, "primary"),
@@ -509,7 +514,9 @@ class TestTestGP:
                 assert gp.status == FeedbackStatus.NOT_ACCEPTED
 
     @staticmethod
-    @pytest.mark.parametrize("source", ["primary", "secondary", "tertiary"])
+    @pytest.mark.parametrize(
+        "source", ["primary", "secondary/nested-folder", "tertiary"]
+    )
     async def test_test_gp_duplicate(
         fake_cp,
         fake_accepted_vds,

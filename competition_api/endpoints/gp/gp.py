@@ -42,8 +42,12 @@ async def process_gp_upload(
 
     gp_row = (
         await db.execute(insert(GeneratedPatch).values(**row).returning(GeneratedPatch))
-    ).fetchone()[0]
+    ).fetchone()
     await db.commit()
+
+    if gp_row is None:
+        raise RuntimeError("No value returned on GeneratedPatch database insert")
+    gp_row = gp_row[0]
 
     auditor.push_context(gp_uuid=gp_row.id)
     await auditor.emit(

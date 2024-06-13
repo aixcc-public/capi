@@ -28,4 +28,5 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PYTHON_BLACK_CONFIG_FILE: pyproject.toml
           PYTHON_ISORT_CONFIG_FILE: pyproject.toml
+          PYTHON_MYPY_CONFIG_FILE: pyproject.toml
           PYTHON_PYLINT_CONFIG_FILE: pyproject.toml

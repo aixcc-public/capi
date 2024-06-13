@@ -49,7 +49,7 @@ def test_project_yaml():
         "harnesses": {"id_1": {"name": "test_harness"}},
         "cp_sources": {
             "primary": {"ref": "v1.1.0"},
-            "secondary": {"ref": "v3.0.0"},
+            "secondary/nested-folder": {"ref": "v3.0.0"},
             "tertiary": {},
         },
     }

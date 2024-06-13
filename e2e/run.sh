@@ -2,6 +2,7 @@
 
 set -e
 
+AUDIT_LOG="${AUDIT_LOG:-capi_logs/audit.log}"
 CURL="curl --location --silent --user 00000000-0000-0000-0000-000000000000:secret"
 
 until $CURL localhost:8082/health/ >/dev/null; do
@@ -67,6 +68,13 @@ done
 
 echo "Final GP Status: ${STATUS}"
 echo ""
-echo "Results"
 
-sleep 1
+while [ -z "$(jq <"$AUDIT_LOG" '. | select( .event_type | match("gp_submission_success"))')" ]; do
+	echo "Waiting for GP success event"
+	# Wait 3 minutes max
+	((c++)) && ((c == 36)) && echo "Did not find GP success event in the audit log" && exit 1
+	sleep 5
+done
+
+echo "Results"
+cat "$AUDIT_LOG"
