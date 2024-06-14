@@ -105,7 +105,9 @@ async def process_gp_upload(
     )
     await db.commit()
 
-    gp_row = (await db.execute(select(GeneratedPatch))).fetchall()[0][0]
+    gp_row = (
+        await db.execute(select(GeneratedPatch).where(GeneratedPatch.id == gp_row.id))
+    ).fetchall()[0][0]
 
     asyncio.create_task(TaskRunner(vds.cp_name, auditor).test_gp(gp_row, vds))
 

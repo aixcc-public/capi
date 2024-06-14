@@ -6,12 +6,13 @@ from unittest import mock
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import insert, select, update
 from vyper import v
 
 from competition_api.audit.types import EventType, GPSubmissionInvalidReason
 from competition_api.db import GeneratedPatch, VulnerabilityDiscovery, db_session
 from competition_api.models.types import FeedbackStatus
+from tests.conftest import FAKE_CP_NAME
 
 
 class TestGP:
@@ -101,6 +102,54 @@ class TestGP:
             assert invalid_evt.reason == invalid_reason
         else:
             assert not invalid_evt
+
+    @staticmethod
+    async def test_post_wrong_return(
+        client,
+        fake_accepted_vds,
+        auth_header,
+        mock_get_auditor,
+    ):
+        body = {"data": "ZmFrZQo=", "cpv_uuid": str(fake_accepted_vds["cpv_uuid"])}
+
+        # Boost the odds that the DB returns the wrong row to the API endpoint
+        wrong_ids = set()
+        for _ in range(100):
+            async with db_session() as db:
+                cpv_uuid = uuid4()
+                await db.execute(
+                    insert(VulnerabilityDiscovery).values(
+                        team_id=uuid4(),
+                        cpv_uuid=cpv_uuid,
+                        cp_name=FAKE_CP_NAME,
+                        pou_commit_sha1="not",
+                        pou_sanitizer="id_1",
+                        pov_harness="id_1",
+                        pov_data_sha256="not",
+                    )
+                )
+                wrong_ids.add(
+                    str(
+                        (
+                            await db.execute(
+                                insert(GeneratedPatch)
+                                .values(cpv_uuid=cpv_uuid, data_sha256="not")
+                                .returning(GeneratedPatch.id)
+                            )
+                        ).fetchall()[0][0]
+                    )
+                )
+
+        with mock.patch(
+            "competition_api.endpoints.gp.gp.TaskRunner", autospec=True
+        ), mock.patch("competition_api.endpoints.gp.gp.get_auditor", mock_get_auditor):
+            resp = client.post("/submission/gp/", json=body, headers=auth_header)
+
+        assert resp.status_code == 200
+
+        resp = resp.json()
+
+        assert resp["gp_uuid"] not in wrong_ids
 
     @staticmethod
     @pytest.mark.parametrize(
