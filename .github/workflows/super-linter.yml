@@ -26,6 +26,7 @@ jobs:
           VALIDATE_ALL_CODEBASE: false
           DEFAULT_BRANCH: "main"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          JAVASCRIPT_DEFAULT_STYLE: prettier
           PYTHON_BLACK_CONFIG_FILE: pyproject.toml
           PYTHON_ISORT_CONFIG_FILE: pyproject.toml
           PYTHON_MYPY_CONFIG_FILE: pyproject.toml

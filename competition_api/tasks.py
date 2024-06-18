@@ -147,7 +147,7 @@ class TaskRunner:
                         ],
                     )
 
-                # Check if the competitor has already submitted a working VDS
+                # Check if the competitor has already submitted a working VDS for this commit
                 submissions_for_commit = (
                     await db.execute(
                         select(
@@ -213,7 +213,8 @@ class TaskRunner:
                     select(
                         func.count(GeneratedPatch.id)  # pylint: disable=not-callable
                     ).where(
-                        GeneratedPatch.cpv_uuid == gp.cpv_uuid,
+                        GeneratedPatch.cpv_uuid
+                        == gp.cpv_uuid,  # CPV UUIDs are globally unique
                         GeneratedPatch.id != gp.id,
                     )
                 )

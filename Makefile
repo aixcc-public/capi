@@ -10,11 +10,14 @@ HOST_CP_ROOT_DIR = $(ROOT_DIR)/cp_root
 
 VOLUMES = $(HOST_CAPI_LOGS) $(HOST_CP_ROOT_DIR)
 
-.PHONY: format sec lint build run test up down demo
+export WEB_CONCURRENCY=4
+
+.PHONY: format sec lint build run test up down e2e loadtest
 
 format:
 	poetry run isort $(MODULES)
 	poetry run black $(MODULES)
+	prettier --write "./**/*.js"
 
 sec:
 	poetry run bandit $(MODULES)
@@ -43,11 +46,17 @@ test:
 compose-build:
 	docker-compose build
 
+compose-build-loadtest:
+	docker-compose --profile loadtest build
+
 up: local-volumes mock-cp compose-build
-	WEB_CONCURRENCY=4 docker-compose up
+	docker-compose up
 
 down:
 	docker-compose down
+
+down-volumes:
+	docker-compose down -v
 
 jenkins-cp: local-volumes
 	rm -rf $(HOST_CP_ROOT_DIR)/$@
@@ -61,12 +70,24 @@ mock-cp: local-volumes
 
 clean-volumes:
 	rm -rf $(VOLUMES)
+	rm -f loadtest/loadtest_config.yaml
 
-clean:
-	docker-compose down -v
+clean: down-volumes clean-volumes
 
 e2e: clean clean-volumes local-volumes mock-cp compose-build
 	:>$(AUDIT_LOG)
 	WEB_CONCURRENCY=4 docker-compose up -d
 	cd e2e && ./run.sh; docker-compose down
 	cat $(AUDIT_LOG)
+
+loadtest/loadtest_config.yaml:
+	@printf -- "---\n" > $@
+	@printf "auth:\n" >> $@
+	@printf "  preload:\n" >> $@
+	@for i in {1..100}; do printf "    %s: secret\n" $$(uuidgen) >> $@; done
+	@printf "database:\n" >> $@
+	@printf "  pool:\n" >> $@
+	@printf "    size: 450\n" >> $@
+
+loadtest: clean loadtest/loadtest_config.yaml mock-cp
+	@docker compose --profile loadtest -f compose.yaml -f loadtest/compose_overrides.yaml up --force-recreate --exit-code-from loadtest --build

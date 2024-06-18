@@ -3,7 +3,8 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import argon2
-from sqlalchemy import String, Uuid, insert, select, update
+from sqlalchemy import String, Uuid, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 from sqlalchemy.orm import Mapped, mapped_column
 from structlog.stdlib import get_logger
@@ -24,7 +25,7 @@ class Token(Base):
     token: Mapped[str] = mapped_column("token", String, nullable=True)
 
     @classmethod
-    async def create(
+    async def upsert(
         cls, db: AsyncConnection, token_id: UUID | None = None, token: str | None = None
     ) -> tuple[UUID, str]:
         token = (
@@ -36,26 +37,18 @@ class Token(Base):
             values["id"] = token_id
 
         db_token_id = (
-            await db.execute(insert(cls).values(**values).returning(cls.id))
+            await db.execute(
+                insert(cls)
+                .values(**values)
+                .returning(cls.id)
+                .on_conflict_do_update(index_elements=[cls.id], set_=values)
+            )
         ).fetchone()
 
         if db_token_id is None:
             raise RuntimeError("No value returned on Token database insert")
 
         return db_token_id.id, token
-
-    @classmethod
-    async def update(
-        cls, db: AsyncConnection, token_id: UUID, token: str | None = None
-    ) -> tuple[UUID, str]:
-        token = (
-            token if token is not None else secrets.token_urlsafe(GENERATED_TOKEN_LEN)
-        )
-        values = {"token": HASHER.hash(token)}
-
-        await db.execute(update(cls).values(**values))
-
-        return token_id, token
 
     @classmethod
     async def verify(cls, db: AsyncConnection, token_id: UUID, token: str) -> bool:

@@ -7,15 +7,16 @@ import os
 import pathlib
 import tempfile
 from types import MappingProxyType
+from unittest import mock
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 from git import Repo
-from pytest_asyncio import is_async_test
 from pytest_docker_tools import container
 from ruamel.yaml import YAML as RuamelYaml
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
 from vyper import v
 
 from competition_api import cp_registry
@@ -34,6 +35,20 @@ ENV = {"POSTGRES_PASSWORD": "secret", "POSTGRES_USER": "capi", "POSTGRES_DB": "c
 YAML = RuamelYaml(typ="safe")
 
 FAKE_CP_NAME = "fakecp"
+
+
+@pytest.fixture(autouse=True)
+def mock_conn_holder(db_config):
+    # Pytest does not play well with shared async connection pools
+    with mock.patch(
+        "competition_api.db.session.CONNECTION_HOLDER.get_session_class",
+        side_effect=lambda: sessionmaker(
+            create_async_engine(url=v.get("database.url")),
+            expire_on_commit=False,
+            class_=AsyncSession,
+        ),
+    ):
+        yield
 
 
 @pytest.fixture
@@ -159,7 +174,7 @@ def audit_sink():
 @pytest.fixture
 async def creds(db_config):
     async with db_session() as db:
-        return await Token.create(db)
+        return await Token.upsert(db)
 
 
 @pytest.fixture
@@ -234,13 +249,6 @@ async def fake_gp(fake_gp_dict):
     fake_gp_dict = {**fake_gp_dict}
     async with db_session() as db:
         return await _create_and_return(db, GeneratedPatch, fake_gp_dict)
-
-
-def pytest_collection_modifyitems(items):
-    pytest_asyncio_tests = (item for item in items if is_async_test(item))
-    session_scope_marker = pytest.mark.asyncio(scope="session")
-    for async_test in pytest_asyncio_tests:
-        async_test.add_marker(session_scope_marker, append=False)
 
 
 @pytest.fixture

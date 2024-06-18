@@ -49,12 +49,24 @@ services:
     env_file:
       - path: ./env
         required: true
+  loadtest:
+    profiles:
+      - loadtest
+    build:
+      context: loadtest
+      dockerfile: Dockerfile
+    command:
+      - run
+      - script.js
+      - --verbose
+    environment:
+      - AIXCC_API_HOSTNAME=http://capi:8080
+    depends_on:
+      capi:
+        condition: service_healthy
 volumes:
   shared-tmp:
   pgdata:
 configs:
   capi:
-    content: |
-      auth:
-        preload:
-          00000000-0000-0000-0000-000000000000: secret
+    file: ./standard_config.yaml

@@ -21,4 +21,5 @@ if [[ "${LOCAL_USER}" != "0:0" ]]; then
 fi
 
 $BASH -c "cd competition_api && poetry run alembic upgrade head && cd -"
+$BASH -c "poetry run prestart"
 $BASH -c "poetry run uvicorn competition_api.main:app --host 0.0.0.0 --port ${AIXCC_PORT:-8080}"
