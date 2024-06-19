@@ -21,4 +21,5 @@ async def auth_preload():
 
 def main():
     init_vyper()
+    v.set_default("auth.preload", {})
     asyncio.run(auth_preload())
