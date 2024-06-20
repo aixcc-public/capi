@@ -15,8 +15,7 @@ from fastapi.testclient import TestClient
 from git import Repo
 from pytest_docker_tools import container
 from ruamel.yaml import YAML as RuamelYaml
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from vyper import v
 
 from competition_api import cp_registry
@@ -42,7 +41,7 @@ def mock_conn_holder(db_config):
     # Pytest does not play well with shared async connection pools
     with mock.patch(
         "competition_api.db.session.CONNECTION_HOLDER.get_session_class",
-        side_effect=lambda: sessionmaker(
+        side_effect=lambda: async_sessionmaker(
             create_async_engine(url=v.get("database.url")),
             expire_on_commit=False,
             class_=AsyncSession,

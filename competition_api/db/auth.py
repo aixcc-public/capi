@@ -38,7 +38,7 @@ class Token(Base):
 
         db_token_id = (
             await db.execute(
-                insert(cls)
+                insert(cls)  # type: ignore
                 .values(**values)
                 .returning(cls.id)
                 .on_conflict_do_update(index_elements=[cls.id], set_=values)

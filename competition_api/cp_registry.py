@@ -97,7 +97,7 @@ class CPRegistry:
     _lock = RLock()
 
     def __init__(self):
-        self._registry = {}
+        self._registry: dict[str, CP] = {}
 
         if self._registry:
             return

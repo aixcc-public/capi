@@ -72,4 +72,5 @@ asyncio_mode = "auto"
 
 [tool.mypy]
 allow_redefinition = true
+check_untyped_defs = true
 ignore_missing_imports = true # superlinter does not run in our venv

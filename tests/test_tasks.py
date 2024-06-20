@@ -1,4 +1,5 @@
 # pylint: disable=too-many-arguments,too-many-locals,too-many-return-statements,unused-argument
+# mypy: disable-error-code=attr-defined
 import os
 from pathlib import Path
 from typing import Iterator
@@ -105,7 +106,10 @@ def build_mock_run(
                 return (0, "".encode("utf8"), "".encode("utf8"))
 
             assert False, f"mock_run does not support docker {args}"
-
+        elif func == "rm":
+            assert args[0] == "-rf"
+            assert args[1].startswith("/tmp")
+            return (0, "".encode("utf8"), "".encode("utf8"))
         else:
             assert False, f"mock_run does not support {func}"
 
@@ -229,13 +233,11 @@ class TestTestVDS:
         auditor.push_context(vd_uuid=fake_vds["id"], cp_name=fake_vds["cp_name"])
         runner = TaskRunner(fake_cp, auditor)
 
-        san = runner.workspace.project_yaml["sanitizers"][fake_vds["pou_sanitizer"]]
+        san = test_project_yaml["sanitizers"][fake_vds["pou_sanitizer"]]
 
         pov_data = await Flatfile(contents_hash=fake_vds["pov_data_sha256"]).read()
 
         with mock.patch(
-            "competition_api.cp_workspace.CPWorkspace.setup",
-        ), mock.patch(
             "competition_api.cp_workspace.run",
             side_effect=build_mock_run(
                 pov_data,
@@ -338,13 +340,11 @@ class TestTestVDS:
         auditor.push_context(vd_uuid=fake_vds["id"], cp_name=fake_vds["cp_name"])
         runner = TaskRunner(fake_cp, auditor)
 
-        san = runner.workspace.project_yaml["sanitizers"][fake_vds["pou_sanitizer"]]
+        san = test_project_yaml["sanitizers"][fake_vds["pou_sanitizer"]]
 
         pov_data = await Flatfile(contents_hash=fake_vds["pov_data_sha256"]).read()
 
         with mock.patch(
-            "competition_api.cp_workspace.CPWorkspace.setup",
-        ), mock.patch(
             "competition_api.cp_workspace.run",
             side_effect=build_mock_run(
                 pov_data,
@@ -443,9 +443,7 @@ class TestTestGP:
         san = (
             ""
             if sanitizer_does_not_fire
-            else runner.workspace.project_yaml["sanitizers"][
-                fake_accepted_vds["pou_sanitizer"]
-            ]
+            else test_project_yaml["sanitizers"][fake_accepted_vds["pou_sanitizer"]]
         )
 
         pov_data = await Flatfile(
@@ -467,8 +465,6 @@ class TestTestGP:
                 tests_returncode=0 if functional_tests_pass else 1,
                 container_name=test_project_yaml["docker_image"],
             ),
-        ), mock.patch(
-            "competition_api.cp_workspace.CPWorkspace.setup",
         ):
             await runner.test_gp(gp, vds)
 
@@ -561,9 +557,7 @@ class TestTestGP:
         )
         runner = TaskRunner(fake_cp, auditor)
 
-        san = runner.workspace.project_yaml["sanitizers"][
-            fake_accepted_vds["pou_sanitizer"]
-        ]
+        san = test_project_yaml["sanitizers"][fake_accepted_vds["pou_sanitizer"]]
 
         pov_data = await Flatfile(
             contents_hash=fake_accepted_vds["pov_data_sha256"]
@@ -584,8 +578,6 @@ class TestTestGP:
                 tests_returncode=0,
                 container_name=test_project_yaml["docker_image"],
             ),
-        ), mock.patch(
-            "competition_api.cp_workspace.CPWorkspace.setup",
         ):
             await runner.test_gp(gp, vds)
 
@@ -683,9 +675,7 @@ class TestTestGP:
         )
         runner = TaskRunner(fake_cp, auditor)
 
-        san = runner.workspace.project_yaml["sanitizers"][
-            fake_accepted_vds["pou_sanitizer"]
-        ]
+        san = test_project_yaml["sanitizers"][fake_accepted_vds["pou_sanitizer"]]
 
         pov_data = await Flatfile(
             contents_hash=fake_accepted_vds["pov_data_sha256"]
@@ -706,8 +696,6 @@ class TestTestGP:
                 tests_returncode=0,
                 container_name=test_project_yaml["docker_image"],
             ),
-        ), mock.patch(
-            "competition_api.cp_workspace.CPWorkspace.setup",
         ):
             await runner.test_gp(gp, vds)
 

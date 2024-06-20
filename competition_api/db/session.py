@@ -1,8 +1,12 @@
 import os
 from contextlib import asynccontextmanager
 
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from vyper import v
 
 v.set_default("database.pool.size", 100)
@@ -13,8 +17,8 @@ WEB_CONCURRENCY = int(os.environ.get("WEB_CONCURRENCY", 1))
 
 class ConnectionHolder:
     def __init__(self):
-        self.engine: AsyncEngine = None
-        self.session_class: sessionmaker = None
+        self.engine: AsyncEngine | None = None
+        self.session_class: async_sessionmaker | None = None
 
     def get_engine(self) -> AsyncEngine:
         if not self.engine:
@@ -25,9 +29,9 @@ class ConnectionHolder:
             )
         return self.engine
 
-    def get_session_class(self) -> sessionmaker:
+    def get_session_class(self) -> async_sessionmaker:
         if not self.session_class:
-            self.session_class = sessionmaker(
+            self.session_class = async_sessionmaker(
                 self.get_engine(), expire_on_commit=False, class_=AsyncSession
             )
         return self.session_class

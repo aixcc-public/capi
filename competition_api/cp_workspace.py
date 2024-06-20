@@ -1,6 +1,8 @@
 import asyncio
+import contextlib
 import os
-import shutil
+from pathlib import Path
+from typing import Any
 
 from git import Repo
 from structlog.stdlib import get_logger
@@ -33,27 +35,48 @@ async def run(func, *args, stdin=None, **kwargs):
     return return_code, stdout, stderr
 
 
-class CPWorkspace:
-    def __init__(self, cp_name):
+class CPWorkspace(contextlib.AbstractAsyncContextManager):
+    def __init__(self, cp_name: str):
         cp = CPRegistry.instance().get(cp_name)
         if cp is None:
             raise ValueError(f"cp_name {cp_name} does not exist")
         self.cp = cp
+        self.workdir: Path
+        self.project_yaml: dict[str, Any]
+        self.repo: Repo
+        self.src_repo: Repo | None
+        self.run_env: dict[str, str]
 
+    async def __aenter__(self):
         # Make working copies
         self.workdir = self.cp.copy()
         self.project_yaml = self.cp.project_yaml
 
         self.repo = Repo(self.workdir)
-        self.src_repo: Repo | None = None
+        self.src_repo = None
 
         self.run_env = {
             "DOCKER_IMAGE_NAME": self.project_yaml["docker_image"],
             "DOCKER_HOST": os.environ.get("DOCKER_HOST", ""),
         }
 
-    def __del__(self):
-        shutil.rmtree(self.workdir)
+        await LOGGER.adebug("Workspace: setup")
+        await run(
+            "docker",
+            "login",
+            "ghcr.io",
+            "-u",
+            os.environ.get("GITHUB_USER", ""),
+            "--password-stdin",
+            stdin=os.environ.get("GITHUB_TOKEN", ""),
+        )
+        await run("docker", "pull", self.project_yaml["docker_image"])
+
+        return self
+
+    async def __aexit__(self, _exc_type, _exc, _tb):
+        # rm -rf will work over a CIFS mount, but shutil.rmtree will not
+        await run("rm", "-rf", str(self.workdir))
 
     def set_src_repo(self, ref: str):
         source = self.cp.source_from_ref(ref)
@@ -74,19 +97,6 @@ class CPWorkspace:
         if self.src_repo is None:
             return None
         return self.src_repo.head.commit.hexsha
-
-    async def setup(self):
-        await LOGGER.adebug("Workspace: setup")
-        await run(
-            "docker",
-            "login",
-            "ghcr.io",
-            "-u",
-            os.environ.get("GITHUB_USER", ""),
-            "--password-stdin",
-            stdin=os.environ.get("GITHUB_TOKEN", ""),
-        )
-        await run("docker", "pull", self.project_yaml["docker_image"])
 
     def checkout(self, ref: str):
         LOGGER.debug("Workspace: checkout %s", ref)
