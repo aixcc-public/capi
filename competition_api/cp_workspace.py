@@ -104,7 +104,7 @@ class CPWorkspace(contextlib.AbstractAsyncContextManager):
         if self.src_repo is None:
             raise NotImplementedError
 
-        self.src_repo.git.checkout(ref)
+        self.src_repo.git.checkout(ref, force=True)
 
         LOGGER.debug("Checked out %s", self.current_commit())
 
