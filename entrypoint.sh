@@ -3,6 +3,7 @@
 set -e
 
 LOCAL_USER=${LOCAL_USER:-1000:1000}
+WORKER_TIMEOUT_SECONDS=180
 BASH="bash"
 
 if [[ "${LOCAL_USER}" != "0:0" ]]; then
@@ -22,4 +23,4 @@ fi
 
 $BASH -c "cd competition_api && poetry run alembic upgrade head && cd -"
 $BASH -c "poetry run prestart"
-$BASH -c "poetry run uvicorn competition_api.main:app --host 0.0.0.0 --port ${AIXCC_PORT:-8080}"
+$BASH -c "poetry run gunicorn -k uvicorn.workers.UvicornWorker competition_api.main:app --bind 0.0.0.0:${AIXCC_PORT:-8080} --timeout $WORKER_TIMEOUT_SECONDS"

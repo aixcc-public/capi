@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import os
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -75,8 +76,7 @@ class CPWorkspace(contextlib.AbstractAsyncContextManager):
         return self
 
     async def __aexit__(self, _exc_type, _exc, _tb):
-        # rm -rf will work over a CIFS mount, but shutil.rmtree will not
-        await run("rm", "-rf", str(self.workdir))
+        shutil.rmtree(self.workdir, ignore_errors=True)
 
     def set_src_repo(self, ref: str):
         source = self.cp.source_from_ref(ref)
