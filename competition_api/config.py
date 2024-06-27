@@ -28,3 +28,5 @@ def init_vyper():
         LOGGER.warning("Config file not found")
 
     generate_config()
+
+    v.set_default("scoring.reject_duplicate_vds", True)

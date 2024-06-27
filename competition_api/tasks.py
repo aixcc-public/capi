@@ -7,6 +7,7 @@ import whatthepatch
 from sqlalchemy import func, select, update
 from sqlalchemy_dlock.asyncio import create_async_sadlock
 from structlog.stdlib import get_logger
+from vyper import v
 
 from competition_api.audit import Auditor
 from competition_api.audit.types import (
@@ -145,32 +146,34 @@ class TaskRunner:
                     ],
                 )
 
-            # Check if the competitor has already submitted a working VDS for this commit
-            submissions_for_commit = (
-                await db.execute(
-                    select(
-                        func.count(  # pylint: disable=not-callable
-                            VulnerabilityDiscovery.id
+            if v.get_bool("scoring.reject_duplicate_vds"):
+                # Check if the competitor has already submitted a working VDS for this commit
+                submissions_for_commit = (
+                    await db.execute(
+                        select(
+                            func.count(  # pylint: disable=not-callable
+                                VulnerabilityDiscovery.id
+                            )
+                        ).where(
+                            VulnerabilityDiscovery.pou_commit_sha1
+                            == vds.pou_commit_sha1,
+                            VulnerabilityDiscovery.team_id == vds.team_id,
+                            VulnerabilityDiscovery.cpv_uuid.is_not(None),
                         )
-                    ).where(
-                        VulnerabilityDiscovery.pou_commit_sha1 == vds.pou_commit_sha1,
-                        VulnerabilityDiscovery.team_id == vds.team_id,
-                        VulnerabilityDiscovery.cpv_uuid.is_not(None),
                     )
-                )
-            ).fetchone()
+                ).fetchone()
 
-            if submissions_for_commit[0] > 0:
-                await self.auditor.emit(
-                    EventType.VD_SUBMISSION_FAIL,
-                    reasons=[VDSubmissionFailReason.DUPLICATE_COMMIT],
-                )
-                await db.execute(
-                    update(VulnerabilityDiscovery)
-                    .where(VulnerabilityDiscovery.id == vds.id)
-                    .values(status=FeedbackStatus.NOT_ACCEPTED)
-                )
-                return
+                if submissions_for_commit[0] > 0:
+                    await self.auditor.emit(
+                        EventType.VD_SUBMISSION_FAIL,
+                        reasons=[VDSubmissionFailReason.DUPLICATE_COMMIT],
+                    )
+                    await db.execute(
+                        update(VulnerabilityDiscovery)
+                        .where(VulnerabilityDiscovery.id == vds.id)
+                        .values(status=FeedbackStatus.NOT_ACCEPTED)
+                    )
+                    return
 
             # TODO: "Intentional Vuln?" box is not fill-out-able
 
