@@ -130,7 +130,13 @@ class CPRegistry:
                         )
                         continue
                     self._registry[name] = cp
-                    LOGGER.info("Loaded cp %s", name)
+
+                    has_internal = os.path.isdir(item / ".internal_only")
+                    LOGGER.info(
+                        "Loaded cp %s%s",
+                        name,
+                        " with internal folder" if has_internal else "",
+                    )
                 else:
                     LOGGER.info(
                         "Item %s in %s does not look like a challenge problem",

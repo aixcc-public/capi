@@ -14,6 +14,10 @@ from competition_api.flatfile import Flatfile
 LOGGER = get_logger(__name__)
 
 
+class BadReturnCode(Exception):
+    pass
+
+
 async def run(func, *args, stdin=None, **kwargs):
     await LOGGER.adebug("%s %s %s", func, args, kwargs)
     proc = await asyncio.create_subprocess_exec(
@@ -60,6 +64,10 @@ class CPWorkspace(contextlib.AbstractAsyncContextManager):
             "DOCKER_IMAGE_NAME": self.project_yaml["docker_image"],
             "DOCKER_HOST": os.environ.get("DOCKER_HOST", ""),
         }
+
+        internal_dir = self.workdir / ".internal_only"
+        if os.path.isdir(internal_dir):
+            self.run_env["DOCKER_EXTRA_ARGS"] = f"-v {internal_dir}:/.internal_only"
 
         await LOGGER.adebug("Workspace: setup")
         await run(
@@ -121,14 +129,16 @@ class CPWorkspace(contextlib.AbstractAsyncContextManager):
             )
 
         if patch_sha256 is None:
-            return_code, stdout, stderr = await run(
-                "./run.sh", "build", cwd=self.workdir, env=self.run_env
+            return_code, _, _ = await run(
+                "./run.sh", "-x", "-v", "build", cwd=self.workdir, env=self.run_env
             )
 
         else:
             patch = Flatfile(contents_hash=patch_sha256)
-            return_code, stdout, stderr = await run(
+            return_code, _, _ = await run(
                 "./run.sh",
+                "-x",
+                "-v",
                 "build",
                 patch.filename,
                 source,
@@ -136,11 +146,7 @@ class CPWorkspace(contextlib.AbstractAsyncContextManager):
                 env=self.run_env,
             )
 
-        return (
-            return_code == 0
-            and "Error".encode("utf8") not in stdout
-            and "Error".encode("utf8") not in stderr
-        )
+        return return_code == 0
 
     async def check_sanitizers(self, blob_sha256: str, harness: str) -> set[str]:
         blob = Flatfile(contents_hash=blob_sha256)
@@ -150,14 +156,19 @@ class CPWorkspace(contextlib.AbstractAsyncContextManager):
             blob.sha256,
         )
 
-        await run(
+        return_code, _, _ = await run(
             "./run.sh",
+            "-x",
+            "-v",
             "run_pov",
             blob.filename,
             self.harness(harness),
             cwd=self.workdir,
             env=self.run_env,
         )
+
+        if return_code != 0:
+            raise BadReturnCode
 
         output_dir = self.workdir / "out" / "output"
 
@@ -186,6 +197,6 @@ class CPWorkspace(contextlib.AbstractAsyncContextManager):
     async def run_functional_tests(self) -> bool:
         await LOGGER.adebug("Workspace: run tests")
         return_code, _, _ = await run(
-            "./run.sh", "run_tests", cwd=self.workdir, env=self.run_env
+            "./run.sh", "-x", "-v", "run_tests", cwd=self.workdir, env=self.run_env
         )
         return return_code == 0

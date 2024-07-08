@@ -33,10 +33,17 @@ def build_mock_run(
     sanitizer: Iterator | None = None,
     patch_returncode=0,
     tests_returncode=0,
+    pov_returncode=0,
     container_name="",
 ):
     def mock_run(func, *args, cwd=None, stdin=None, env=None):
         if func == "./run.sh":
+            assert args[0:2] == (
+                "-x",
+                "-v",
+            ), f"./run.sh was not called with -x and -v: got {args[0:2]}"
+            args = args[2:]
+
             if args[0] == "build":
                 if gp_patch:
                     _, patch_filename, context = args
@@ -81,7 +88,7 @@ def build_mock_run(
                 ) as stderr_file:
                     stderr_file.write(next(sanitizer) if sanitizer else "")
 
-                return (0, "".encode("utf8"), "".encode("utf8"))
+                return (pov_returncode, "".encode("utf8"), "".encode("utf8"))
 
             if args[0] == "run_tests":
                 assert len(args) == 1, f"Args too long: {args}"
@@ -190,6 +197,12 @@ class TestTestVDS:
                 [True, True, False],
                 "primary",
             ),
+            (
+                EventType.VD_SUBMISSION_FAIL,
+                [VDSubmissionFailReason.RUN_POV_FAILED],
+                [True, True, False],
+                "primary",
+            ),
         ],
     )
     async def test_test_vds(
@@ -248,12 +261,17 @@ class TestTestVDS:
                     for fires, san in zip(sanitizer_fires, [san, san, san])
                 ),
                 container_name=test_project_yaml["docker_image"],
+                pov_returncode=(
+                    1 if fail_reason == [VDSubmissionFailReason.RUN_POV_FAILED] else 0
+                ),
             ),
         ), mock.patch(
             "competition_api.cp_workspace.CPWorkspace.checkout"
         ) as mock_checkout:
             await runner.test_vds(vds)
-            if not invalid_test:
+            if not invalid_test and fail_reason != [
+                VDSubmissionFailReason.RUN_POV_FAILED
+            ]:
                 mock_checkout.assert_has_calls(
                     [
                         mock.call(
@@ -382,18 +400,28 @@ class TestTestVDS:
 class TestTestGP:
     @staticmethod
     @pytest.mark.parametrize(
-        "patch_builds,functional_tests_pass,sanitizer_does_not_fire,source",
+        "patch_builds,functional_tests_pass,sanitizer_does_not_fire,pov_works,source",
         [
-            (True, True, True, "primary"),
-            (True, True, True, "secondary/nested-folder"),
-            (True, True, True, "tertiary"),
-            (True, True, False, "primary"),
-            (True, False, True, "primary"),
-            (True, False, False, "primary"),
-            (False, True, True, "primary"),
-            (False, True, False, "primary"),
-            (False, False, True, "primary"),
-            (False, False, False, "primary"),
+            (True, True, True, True, "primary"),
+            (True, True, True, True, "secondary/nested-folder"),
+            (True, True, True, True, "tertiary"),
+            (True, True, False, True, "primary"),
+            (True, False, True, True, "primary"),
+            (True, False, False, True, "primary"),
+            (False, True, True, True, "primary"),
+            (False, True, False, True, "primary"),
+            (False, False, True, True, "primary"),
+            (False, False, False, True, "primary"),
+            (True, True, True, False, "primary"),
+            (True, True, True, False, "secondary/nested-folder"),
+            (True, True, True, False, "tertiary"),
+            (True, True, False, False, "primary"),
+            (True, False, True, False, "primary"),
+            (True, False, False, False, "primary"),
+            (False, True, True, False, "primary"),
+            (False, True, False, False, "primary"),
+            (False, False, True, False, "primary"),
+            (False, False, False, False, "primary"),
         ],
     )
     async def test_test_gp(
@@ -404,6 +432,7 @@ class TestTestGP:
         patch_builds,
         functional_tests_pass,
         sanitizer_does_not_fire,
+        pov_works,
         source,
         test_project_yaml,
         creds,
@@ -463,6 +492,7 @@ class TestTestGP:
                 sanitizer=(san for san in [san, san, ""]),
                 patch_returncode=0 if patch_builds else 1,
                 tests_returncode=0 if functional_tests_pass else 1,
+                pov_returncode=0 if pov_works else 1,
                 container_name=test_project_yaml["docker_image"],
             ),
         ):
@@ -474,7 +504,7 @@ class TestTestGP:
             assert not runner.auditor.get_events(EventType.GP_PATCH_BUILT)
             fail = runner.auditor.get_events(EventType.GP_SUBMISSION_FAIL)
             assert fail
-            assert fail[0].reason == GPSubmissionFailReason.PATCH_DID_NOT_APPLY
+            assert fail[0].reason == GPSubmissionFailReason.PATCH_FAILED_APPLY_OR_BUILD
             return
 
         if functional_tests_pass:
@@ -486,13 +516,24 @@ class TestTestGP:
             assert fail[0].reason == GPSubmissionFailReason.FUNCTIONAL_TESTS_FAILED
             return
 
-        if sanitizer_does_not_fire:
-            assert runner.auditor.get_events(EventType.GP_SANITIZER_DID_NOT_FIRE)
+        if pov_works:
+            if sanitizer_does_not_fire:
+                assert runner.auditor.get_events(EventType.GP_SANITIZER_DID_NOT_FIRE)
+            else:
+                assert not runner.auditor.get_events(
+                    EventType.GP_SANITIZER_DID_NOT_FIRE
+                )
+                fail = runner.auditor.get_events(EventType.GP_SUBMISSION_FAIL)
+                assert fail
+                assert (
+                    fail[0].reason == GPSubmissionFailReason.SANITIZER_FIRED_AFTER_PATCH
+                )
+                return
         else:
             assert not runner.auditor.get_events(EventType.GP_SANITIZER_DID_NOT_FIRE)
             fail = runner.auditor.get_events(EventType.GP_SUBMISSION_FAIL)
             assert fail
-            assert fail[0].reason == GPSubmissionFailReason.SANITIZER_FIRED_AFTER_PATCH
+            assert fail[0].reason == GPSubmissionFailReason.RUN_POV_FAILED
             return
 
         assert runner.auditor.get_events(EventType.GP_SUBMISSION_SUCCESS)

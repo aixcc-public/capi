@@ -61,6 +61,7 @@ disable = [
     "missing-function-docstring",
     "missing-module-docstring",
     "too-few-public-methods",
+    "too-many-branches",
     "too-many-locals",
     "too-many-statements",
     "import-error", # superlinter does not run in our venv

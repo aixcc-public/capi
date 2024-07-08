@@ -17,7 +17,7 @@ from competition_api.audit.types import (
     VDSubmissionFailReason,
     VDSubmissionInvalidReason,
 )
-from competition_api.cp_workspace import CPWorkspace
+from competition_api.cp_workspace import BadReturnCode, CPWorkspace
 from competition_api.db import GeneratedPatch, VulnerabilityDiscovery, db_session
 from competition_api.flatfile import Flatfile
 from competition_api.lib import peek
@@ -87,6 +87,11 @@ class TaskRunner:
                 return
 
             source = workspace.cp.source_from_ref(vds.pou_commit_sha1)
+            if source is None:
+                # this should never happen
+                # if cp.has(commit_sha) then commit_sha is in one of the sources
+                raise RuntimeError("source was none but cp.has(commit_sha) was true")
+
             src_ref = workspace.cp.sources[source].get("ref", "main")
 
             # Validate sanitizer fires at HEAD & introducing commit and doesn't fire before
@@ -121,6 +126,17 @@ class TaskRunner:
                     await self.auditor.emit(
                         EventType.VD_SUBMISSION_INVALID,
                         reason=VDSubmissionInvalidReason.COMMIT_CHECKOUT_FAILED,
+                    )
+                    await db.execute(
+                        update(VulnerabilityDiscovery)
+                        .where(VulnerabilityDiscovery.id == vds.id)
+                        .values(status=FeedbackStatus.NOT_ACCEPTED)
+                    )
+                    return
+                except BadReturnCode:
+                    await self.auditor.emit(
+                        EventType.VD_SUBMISSION_FAIL,
+                        reasons=[VDSubmissionFailReason.RUN_POV_FAILED],
                     )
                     await db.execute(
                         update(VulnerabilityDiscovery)
@@ -282,13 +298,21 @@ class TaskRunner:
 
             workspace.set_src_repo(vds.pou_commit_sha1)
             workspace.checkout(ref)
+
             source = workspace.cp.source_from_ref(vds.pou_commit_sha1)
+            if source is None:
+                # this should never happen. if cp.head_ref_from_ref() returned a value,
+                # then commit_sha is in one of the sources
+                raise RuntimeError(
+                    "source was none but cp.head_ref_from_ref() returned a ref"
+                )
+
             result = await workspace.build(source, patch_sha256=gp.data_sha256)
 
             if not result:
                 await self.auditor.emit(
                     EventType.GP_SUBMISSION_FAIL,
-                    reason=GPSubmissionFailReason.PATCH_DID_NOT_APPLY,
+                    reason=GPSubmissionFailReason.PATCH_FAILED_APPLY_OR_BUILD,
                 )
                 async with db_session() as db:
                     await db.execute(
@@ -320,9 +344,17 @@ class TaskRunner:
             await self.auditor.emit(EventType.GP_FUNCTIONAL_TESTS_PASS)
 
             # Check if sanitizers fire
-            triggered = vds.pou_sanitizer in await self._sanitizers_triggered_at(
-                workspace, vds.pov_data_sha256, vds.pov_harness
-            )
+            try:
+                triggered = vds.pou_sanitizer in await self._sanitizers_triggered_at(
+                    workspace, vds.pov_data_sha256, vds.pov_harness
+                )
+            except BadReturnCode:
+                # The POV ran successfully already, so this should never happen
+                await self.auditor.emit(
+                    EventType.GP_SUBMISSION_FAIL,
+                    reason=GPSubmissionFailReason.RUN_POV_FAILED,
+                )
+                return
 
             if triggered:
                 await self.auditor.emit(

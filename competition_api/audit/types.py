@@ -18,7 +18,8 @@ class GPSubmissionFailReason(Enum):
     FUNCTIONAL_TESTS_FAILED = "functional_tests_failed"
     MALFORMED_PATCH_FILE = "malformed_patch_file"
     PATCHED_DISALLOWED_FILE_EXTENSION = "patched_disallowed_file_extension"
-    PATCH_DID_NOT_APPLY = "patch_did_not_apply"
+    PATCH_FAILED_APPLY_OR_BUILD = "patch_failed_apply_or_build"
+    RUN_POV_FAILED = "run_pov_failed"
     SANITIZER_FIRED_AFTER_PATCH = "sanitizer_fired_after_patch"
 
 
@@ -32,6 +33,7 @@ class VDSubmissionInvalidReason(Enum):
 
 class VDSubmissionFailReason(Enum):
     DUPLICATE_COMMIT = "duplicate_commit"
+    RUN_POV_FAILED = "run_pov_failed"
     SANITIZER_DID_NOT_FIRE_AT_COMMIT = "sanitizer_did_not_fire_at_commit"
     SANITIZER_DID_NOT_FIRE_AT_HEAD = "sanitizer_did_not_fire_at_head"
     SANITIZER_FIRED_BEFORE_COMMIT = "sanitizer_fired_before_commit"
