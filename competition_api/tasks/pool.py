@@ -7,7 +7,11 @@ v.set_default("redis.port", 6379)
 
 
 def build_redis_settings() -> RedisSettings:
-    return RedisSettings(host=v.get("redis.host"), port=v.get("redis.port"))
+    return RedisSettings(
+        host=v.get("redis.host"),
+        port=v.get("redis.port"),
+        password=v.get("redis.password"),
+    )
 
 
 async def fastapi_get_task_pool() -> ArqRedis:
