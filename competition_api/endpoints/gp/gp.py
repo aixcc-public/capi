@@ -116,7 +116,8 @@ async def process_gp_upload(
         vds,
         gp_row,
         auditor,
-        _job_id=f"check-gp-{team_id}-{vds.cp_name}-{vds.pou_commit_sha1}-{patch.sha256}",
+        _job_id="{capijobs}"
+        + f"check-gp-{team_id}-{vds.cp_name}-{vds.pou_commit_sha1}-{patch.sha256}",
     )
 
     return GPResponse(

@@ -93,7 +93,8 @@ async def process_vd_upload(
         "check_vds",
         db_row,
         auditor,
-        _job_id=f"check-vds-{team_id}-{vds.cp_name}-{vds.pou.commit_sha1}-{blob.sha256}",
+        _job_id="{capijobs}"
+        + f"check-vds-{team_id}-{vds.cp_name}-{vds.pou.commit_sha1}-{blob.sha256}",
     )
 
     return VDSResponse(
