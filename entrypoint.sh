@@ -20,6 +20,17 @@ if [[ "${LOCAL_USER}" != "0:0" ]]; then
 	BASH="gosu appuser bash"
 fi
 
-$BASH -c "cd competition_api && poetry run alembic upgrade head && cd -"
-$BASH -c "poetry run prestart"
-$BASH -c "poetry run uvicorn competition_api.main:app --host 0.0.0.0 --port ${AIXCC_PORT:-8080} --workers ${WEB_CONCURRENCY:-4}"
+MODE=${MODE:-api}
+
+if [[ "${MODE}" = "worker" ]]; then
+	$BASH -c "poetry run arq competition_api.tasks.Worker"
+elif [[ "${MODE}" = "monitor" ]]; then
+	while true; do
+		$BASH -c "poetry run arq --check competition_api.tasks.Worker" || echo "Initial health status pending"
+		sleep $((AIXCC_WORKER_HEALTH_CHECK_INTERVAL * 3 / 2))
+	done
+else
+	$BASH -c "cd competition_api && poetry run alembic upgrade head && cd -"
+	$BASH -c "poetry run prestart"
+	$BASH -c "poetry run uvicorn competition_api.main:app --host 0.0.0.0 --port ${AIXCC_PORT:-8080} --workers ${WEB_CONCURRENCY:-4}"
+fi

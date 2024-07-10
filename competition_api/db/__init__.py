@@ -2,7 +2,7 @@
 
 from .auth import Token
 from .gp import GeneratedPatch
-from .session import db_session, fastapi_get_db
+from .session import db_session
 from .vds import VulnerabilityDiscovery
 
 __all__ = [
@@ -10,5 +10,4 @@ __all__ = [
     "GeneratedPatch",
     "Token",
     "db_session",
-    "fastapi_get_db",
 ]

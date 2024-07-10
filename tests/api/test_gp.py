@@ -52,7 +52,7 @@ class TestGP:
                 )
 
         with mock.patch(
-            "competition_api.endpoints.gp.gp.TaskRunner", autospec=True
+            "competition_api.endpoints.gp._router.fastapi_get_task_pool", autospec=True
         ), mock.patch("competition_api.endpoints.gp.gp.get_auditor", mock_get_auditor):
             resp = client.post("/submission/gp/", json=body, headers=auth_header)
 
@@ -141,7 +141,7 @@ class TestGP:
                 )
 
         with mock.patch(
-            "competition_api.endpoints.gp.gp.TaskRunner", autospec=True
+            "competition_api.endpoints.gp._router.fastapi_get_task_pool", autospec=True
         ), mock.patch("competition_api.endpoints.gp.gp.get_auditor", mock_get_auditor):
             resp = client.post("/submission/gp/", json=body, headers=auth_header)
 
@@ -181,7 +181,7 @@ class TestGP:
         body["cpv_uuid"] = str(fake_accepted_vds["cpv_uuid"])
 
         with mock.patch(
-            "competition_api.endpoints.gp.gp.TaskRunner", autospec=True
+            "competition_api.endpoints.gp._router.fastapi_get_task_pool", autospec=True
         ), mock.patch("competition_api.endpoints.gp.gp.get_auditor", mock_get_auditor):
             resp = client.post("/submission/gp/", json=body, headers=auth_header)
 

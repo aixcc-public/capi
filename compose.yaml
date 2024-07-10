@@ -11,6 +11,10 @@ services:
       - "shared-tmp:/tmp"
     environment:
       - DOCKER_TLS_CERTDIR # intentionally blank to optimize runtime
+  redis:
+    image: redis:6
+    expose:
+      - "6379"
   postgres:
     image: "postgres:16"
     # this makes postgres log queries
@@ -23,6 +27,18 @@ services:
       - POSTGRES_PASSWORD=secret
       - POSTGRES_USER=capi
       - POSTGRES_DB=capi
+  capi_job_status:
+    build:
+      context: .
+    tty: true
+    restart: always
+    configs:
+      - source: capi
+        target: /etc/capi/config.yaml
+    environment:
+      - MODE=monitor
+      - AIXCC_REDIS_HOST=redis
+      - AIXCC_WORKER_HEALTH_CHECK_INTERVAL=30
   capi:
     build:
       context: .
@@ -38,15 +54,30 @@ services:
       - source: capi
         target: /etc/capi/config.yaml
     environment:
-      - AIXCC_CP_ROOT=/cp_root
-      - AIXCC_DATABASE_HOST=postgres
-      - AIXCC_DATABASE_NAME=capi
-      - AIXCC_DATABASE_PASSWORD=secret
-      - AIXCC_DATABASE_PORT=5432
-      - AIXCC_DATABASE_USERNAME=capi
-      - DOCKER_HOST=tcp://dind:2375
       - WEB_CONCURRENCY=$WEB_CONCURRENCY
     env_file:
+      - path: ./base.env
+        required: true
+      - path: ./env
+        required: true
+  capi_worker:
+    build:
+      context: .
+    tty: true
+    restart: always
+    volumes:
+      - "shared-tmp:/tmp"
+      - "./capi_logs:/var/log/capi"
+      - "./cp_root:/cp_root"
+    configs:
+      - source: capi
+        target: /etc/capi/config.yaml
+    environment:
+      - MODE=worker
+      - WEB_CONCURRENCY=$WEB_CONCURRENCY
+    env_file:
+      - path: ./base.env
+        required: true
       - path: ./env
         required: true
   loadtest:

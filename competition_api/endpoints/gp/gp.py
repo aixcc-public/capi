@@ -1,7 +1,7 @@
-import asyncio
 from typing import Any
 from uuid import UUID
 
+from arq.connections import ArqRedis
 from fastapi import HTTPException, status
 from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -15,13 +15,15 @@ from competition_api.db import GeneratedPatch, VulnerabilityDiscovery, db_sessio
 from competition_api.flatfile import Flatfile
 from competition_api.models import GPResponse, GPStatusResponse, GPSubmission
 from competition_api.models.types import FeedbackStatus, UUIDPathParameter
-from competition_api.tasks import TaskRunner
 
 LOGGER = get_logger(__name__)
 
 
 async def process_gp_upload(
-    gp: GPSubmission, db: AsyncConnection, team_id: UUID
+    gp: GPSubmission,
+    db: AsyncConnection,
+    team_id: UUID,
+    task_pool: ArqRedis,
 ) -> GPResponse:
     clear_contextvars()
     auditor = get_auditor(team_id)
@@ -109,7 +111,13 @@ async def process_gp_upload(
         await db.execute(select(GeneratedPatch).where(GeneratedPatch.id == gp_row.id))
     ).fetchall()[0][0]
 
-    asyncio.create_task(TaskRunner(vds.cp_name, auditor).test_gp(gp_row, vds))
+    await task_pool.enqueue_job(
+        "check_gp",
+        vds,
+        gp_row,
+        auditor,
+        _job_id=f"check-gp-{team_id}-{vds.cp_name}-{vds.pou_commit_sha1}-{patch.sha256}",
+    )
 
     return GPResponse(
         status=gp_row.status,

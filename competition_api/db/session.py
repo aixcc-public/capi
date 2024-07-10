@@ -49,8 +49,3 @@ async def db_session():
         await session.commit()
     finally:
         await session.close()
-
-
-async def fastapi_get_db():
-    async with db_session() as db:
-        yield db

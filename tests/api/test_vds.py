@@ -133,7 +133,7 @@ class TestVDS:
         client, body, return_code, auth_header, mock_get_auditor, auditor, repo
     ):
         with mock.patch(
-            "competition_api.endpoints.vds.vds.TaskRunner", autospec=True
+            "competition_api.endpoints.vds._router.fastapi_get_task_pool", autospec=True
         ), mock.patch(
             "competition_api.endpoints.vds.vds.get_auditor", mock_get_auditor
         ):

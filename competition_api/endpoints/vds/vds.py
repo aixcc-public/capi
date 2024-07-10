@@ -1,6 +1,6 @@
-import asyncio
 import uuid
 
+from arq.connections import ArqRedis
 from fastapi import HTTPException, status
 from sqlalchemy import insert, select
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -15,7 +15,6 @@ from competition_api.db import VulnerabilityDiscovery
 from competition_api.flatfile import Flatfile
 from competition_api.models.types import FeedbackStatus, UUIDPathParameter
 from competition_api.models.vds import VDSResponse, VDSStatusResponse, VDSubmission
-from competition_api.tasks import TaskRunner
 
 LOGGER = get_logger(__name__)
 
@@ -24,6 +23,7 @@ async def process_vd_upload(
     vds: VDSubmission,
     db: AsyncConnection,
     team_id: uuid.UUID,
+    task_pool: ArqRedis,
 ) -> VDSResponse:
     clear_contextvars()
     auditor = get_auditor(team_id)
@@ -89,7 +89,12 @@ async def process_vd_upload(
         sanitizer=db_row.pou_sanitizer,
     )
 
-    asyncio.create_task(TaskRunner(vds.cp_name, auditor).test_vds(db_row))
+    await task_pool.enqueue_job(
+        "check_vds",
+        db_row,
+        auditor,
+        _job_id=f"check-vds-{team_id}-{vds.cp_name}-{vds.pou.commit_sha1}-{blob.sha256}",
+    )
 
     return VDSResponse(
         status=db_row.status,

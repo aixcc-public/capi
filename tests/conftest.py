@@ -122,6 +122,10 @@ def client():
     return TestClient(app)
 
 
+redis_container = container(  # pylint: disable=no-value-for-parameter
+    image="redis:6-alpine", scope="session", ports={"6379/tcp": None}
+)
+
 db_container = container(  # pylint: disable=no-value-for-parameter
     image="postgres:16",
     scope="session",
@@ -130,6 +134,13 @@ db_container = container(  # pylint: disable=no-value-for-parameter
     # this makes postgres log queries
     # command=["postgres", "-c", "log_statement=all"],
 )
+
+
+@pytest.fixture(autouse=True)
+def redis_config(redis_container):
+    host, port = redis_container.get_addr("6379/tcp")
+    v.set("redis.host", host)
+    v.set("redis.port", port)
 
 
 @pytest.fixture(autouse=True)

@@ -19,7 +19,8 @@ from competition_api.audit.types import (
 from competition_api.db import GeneratedPatch, VulnerabilityDiscovery, db_session
 from competition_api.flatfile import Flatfile
 from competition_api.models.types import FeedbackStatus
-from competition_api.tasks import TaskRunner
+from competition_api.tasks.gp import check_gp
+from competition_api.tasks.vds import check_vds
 from tests.lib.patch import build_patch
 
 from .lib.auditor import RecordingAuditor
@@ -205,7 +206,7 @@ class TestTestVDS:
             ),
         ],
     )
-    async def test_test_vds(
+    async def test_check_vds(
         fake_vds,
         fake_cp,
         creds,
@@ -244,7 +245,6 @@ class TestTestVDS:
 
         auditor = RecordingAuditor(creds[0])
         auditor.push_context(vd_uuid=fake_vds["id"], cp_name=fake_vds["cp_name"])
-        runner = TaskRunner(fake_cp, auditor)
 
         san = test_project_yaml["sanitizers"][fake_vds["pou_sanitizer"]]
 
@@ -268,7 +268,7 @@ class TestTestVDS:
         ), mock.patch(
             "competition_api.cp_workspace.CPWorkspace.checkout"
         ) as mock_checkout:
-            await runner.test_vds(vds)
+            await check_vds(None, vds, auditor)
             if not invalid_test and fail_reason != [
                 VDSubmissionFailReason.RUN_POV_FAILED
             ]:
@@ -282,7 +282,7 @@ class TestTestVDS:
                     ]
                 )
 
-        event = runner.auditor.get_events(expected_event_type)
+        event = auditor.get_events(expected_event_type)
         assert event
         event = event[0]
 
@@ -291,7 +291,7 @@ class TestTestVDS:
         elif invalid_test:
             assert event.reason == fail_reason
 
-        sanitizer_results = runner.auditor.get_events(EventType.VD_SANITIZER_RESULT)
+        sanitizer_results = auditor.get_events(EventType.VD_SANITIZER_RESULT)
         assert len(sanitizer_results) == 0 if invalid_test else 3
         for fires, result in zip(sanitizer_fires, sanitizer_results):
             assert result.expected_sanitizer_triggered == fires
@@ -324,7 +324,7 @@ class TestTestVDS:
             (False, "tertiary"),
         ],
     )
-    async def test_test_vds_duplicate(
+    async def test_check_vds_duplicate(
         fake_vds,
         fake_vds_dict,
         fake_cp,
@@ -356,7 +356,6 @@ class TestTestVDS:
 
         auditor = RecordingAuditor(creds[0])
         auditor.push_context(vd_uuid=fake_vds["id"], cp_name=fake_vds["cp_name"])
-        runner = TaskRunner(fake_cp, auditor)
 
         san = test_project_yaml["sanitizers"][fake_vds["pou_sanitizer"]]
 
@@ -372,9 +371,9 @@ class TestTestVDS:
                 container_name=test_project_yaml["docker_image"],
             ),
         ):
-            await runner.test_vds(vds)
+            await check_vds(None, vds, auditor)
 
-        event = runner.auditor.get_events(EventType.VD_SUBMISSION_FAIL)
+        event = auditor.get_events(EventType.VD_SUBMISSION_FAIL)
 
         if existing_success:
             assert event
@@ -424,7 +423,7 @@ class TestTestGP:
             (False, False, False, False, "primary"),
         ],
     )
-    async def test_test_gp(
+    async def test_check_gp(
         fake_cp,
         fake_accepted_vds,
         fake_gp,
@@ -467,7 +466,6 @@ class TestTestGP:
             gp_uuid=fake_gp["id"],
             cpv_uuid=fake_accepted_vds["cpv_uuid"],
         )
-        runner = TaskRunner(fake_cp, auditor)
 
         san = (
             ""
@@ -496,47 +494,45 @@ class TestTestGP:
                 container_name=test_project_yaml["docker_image"],
             ),
         ):
-            await runner.test_gp(gp, vds)
+            await check_gp(None, vds, gp, auditor)
 
         if patch_builds:
-            assert runner.auditor.get_events(EventType.GP_PATCH_BUILT)
+            assert auditor.get_events(EventType.GP_PATCH_BUILT)
         else:
-            assert not runner.auditor.get_events(EventType.GP_PATCH_BUILT)
-            fail = runner.auditor.get_events(EventType.GP_SUBMISSION_FAIL)
+            assert not auditor.get_events(EventType.GP_PATCH_BUILT)
+            fail = auditor.get_events(EventType.GP_SUBMISSION_FAIL)
             assert fail
             assert fail[0].reason == GPSubmissionFailReason.PATCH_FAILED_APPLY_OR_BUILD
             return
 
         if functional_tests_pass:
-            assert runner.auditor.get_events(EventType.GP_FUNCTIONAL_TESTS_PASS)
+            assert auditor.get_events(EventType.GP_FUNCTIONAL_TESTS_PASS)
         else:
-            assert not runner.auditor.get_events(EventType.GP_FUNCTIONAL_TESTS_PASS)
-            fail = runner.auditor.get_events(EventType.GP_SUBMISSION_FAIL)
+            assert not auditor.get_events(EventType.GP_FUNCTIONAL_TESTS_PASS)
+            fail = auditor.get_events(EventType.GP_SUBMISSION_FAIL)
             assert fail
             assert fail[0].reason == GPSubmissionFailReason.FUNCTIONAL_TESTS_FAILED
             return
 
         if pov_works:
             if sanitizer_does_not_fire:
-                assert runner.auditor.get_events(EventType.GP_SANITIZER_DID_NOT_FIRE)
+                assert auditor.get_events(EventType.GP_SANITIZER_DID_NOT_FIRE)
             else:
-                assert not runner.auditor.get_events(
-                    EventType.GP_SANITIZER_DID_NOT_FIRE
-                )
-                fail = runner.auditor.get_events(EventType.GP_SUBMISSION_FAIL)
+                assert not auditor.get_events(EventType.GP_SANITIZER_DID_NOT_FIRE)
+                fail = auditor.get_events(EventType.GP_SUBMISSION_FAIL)
                 assert fail
                 assert (
                     fail[0].reason == GPSubmissionFailReason.SANITIZER_FIRED_AFTER_PATCH
                 )
                 return
         else:
-            assert not runner.auditor.get_events(EventType.GP_SANITIZER_DID_NOT_FIRE)
-            fail = runner.auditor.get_events(EventType.GP_SUBMISSION_FAIL)
+            assert not auditor.get_events(EventType.GP_SANITIZER_DID_NOT_FIRE)
+            fail = auditor.get_events(EventType.GP_SUBMISSION_FAIL)
             assert fail
             assert fail[0].reason == GPSubmissionFailReason.RUN_POV_FAILED
             return
 
-        assert runner.auditor.get_events(EventType.GP_SUBMISSION_SUCCESS)
+        assert auditor.get_events(EventType.GP_SUBMISSION_SUCCESS)
 
         async with db_session() as db:
             gp = (
@@ -554,7 +550,7 @@ class TestTestGP:
     @pytest.mark.parametrize(
         "source", ["primary", "secondary/nested-folder", "tertiary"]
     )
-    async def test_test_gp_duplicate(
+    async def test_check_gp_duplicate(
         fake_cp,
         fake_accepted_vds,
         fake_gp_dict,
@@ -596,7 +592,6 @@ class TestTestGP:
             gp_uuid=fake_gp["id"],
             cpv_uuid=fake_accepted_vds["cpv_uuid"],
         )
-        runner = TaskRunner(fake_cp, auditor)
 
         san = test_project_yaml["sanitizers"][fake_accepted_vds["pou_sanitizer"]]
 
@@ -620,9 +615,9 @@ class TestTestGP:
                 container_name=test_project_yaml["docker_image"],
             ),
         ):
-            await runner.test_gp(gp, vds)
+            await check_gp(None, vds, gp, auditor)
 
-        dupe = runner.auditor.get_events(EventType.DUPLICATE_GP_SUBMISSION_FOR_CPV_UUID)
+        dupe = auditor.get_events(EventType.DUPLICATE_GP_SUBMISSION_FOR_CPV_UUID)
         assert dupe
 
         async with db_session() as db:
@@ -657,7 +652,7 @@ class TestTestGP:
             (GPSubmissionFailReason.MALFORMED_PATCH_FILE, None, "primary"),
         ],
     )
-    async def test_test_gp_fail(
+    async def test_check_gp_fail(
         fake_cp,
         fake_accepted_vds,
         fake_gp_dict,
@@ -714,7 +709,6 @@ class TestTestGP:
             gp_uuid=fake_gp["id"],
             cpv_uuid=fake_accepted_vds["cpv_uuid"],
         )
-        runner = TaskRunner(fake_cp, auditor)
 
         san = test_project_yaml["sanitizers"][fake_accepted_vds["pou_sanitizer"]]
 
@@ -738,9 +732,9 @@ class TestTestGP:
                 container_name=test_project_yaml["docker_image"],
             ),
         ):
-            await runner.test_gp(gp, vds)
+            await check_gp(None, vds, gp, auditor)
 
-        fail = runner.auditor.get_events(EventType.GP_SUBMISSION_FAIL)
+        fail = auditor.get_events(EventType.GP_SUBMISSION_FAIL)
         assert fail
         assert fail[0].reason == fail_reason
 

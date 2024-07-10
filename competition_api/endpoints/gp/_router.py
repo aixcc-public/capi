@@ -1,5 +1,6 @@
 from uuid import UUID
 
+from arq.connections import ArqRedis
 from fastapi import APIRouter, Depends
 from structlog.stdlib import get_logger
 
@@ -7,6 +8,7 @@ from competition_api.db import db_session
 from competition_api.endpoints.lib.auth import get_token_id
 from competition_api.models import GPResponse, GPStatusResponse, GPSubmission
 from competition_api.models.types import UUIDPathParameter
+from competition_api.tasks import fastapi_get_task_pool
 
 from .gp import get_gp_status, process_gp_upload
 
@@ -18,10 +20,11 @@ LOGGER = get_logger(__name__)
 @router.post("/submission/gp/", tags=["submission"])
 async def upload_gp(
     gp: GPSubmission,
+    task_pool: ArqRedis = Depends(fastapi_get_task_pool),
     team_id: UUID = Depends(get_token_id),
 ) -> GPResponse:
     async with db_session() as db:
-        return await process_gp_upload(gp, db, team_id)
+        return await process_gp_upload(gp, db, team_id, task_pool)
 
 
 @router.get("/submission/gp/{gp_uuid}", tags=["submission"])

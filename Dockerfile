@@ -60,7 +60,7 @@ COPY competition_api /code/competition_api/
 RUN poetry install
 
 # disables pyc files
-ENV PYTHONDONTWRITEBYTECODE 1 # disables pyc files
+ENV PYTHONDONTWRITEBYTECODE 1
 
 # disables buffering stdout and stderr
 ENV PYTHONUNBUFFERED 1
