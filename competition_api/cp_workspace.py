@@ -120,13 +120,6 @@ class CPWorkspace(contextlib.AbstractAsyncContextManager):
         await LOGGER.adebug(
             "Workspace: build" + (f" with patch {patch_sha256}" if patch_sha256 else "")
         )
-        with open(self.workdir / ".env.project", "w+", encoding="utf8") as env:
-            env.write(
-                f'DOCKER_VOL_ARGS="-v {self.workdir}/work:/work '
-                f"-v {self.workdir}/src:/src "
-                f"-v {self.workdir}/out:/out "
-                f'-v {self.workdir}/.internal_only:/.internal_only"\n'
-            )
 
         if patch_sha256 is None:
             return_code, _, _ = await run(
