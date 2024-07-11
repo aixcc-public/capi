@@ -90,11 +90,7 @@ async def process_vd_upload(
     )
 
     job_id = "{capijobs}" + f"check-vds-{db_row.id}"
-    enqueued = await task_pool.enqueue_job(
-        "check_vds",
-        db_row,
-        auditor,
-    )
+    enqueued = await task_pool.enqueue_job("check_vds", db_row, auditor, _job_id=job_id)
     if not enqueued:
         await LOGGER.awarning("Job with ID %s was already enqueued", job_id)
 
