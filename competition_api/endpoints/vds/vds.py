@@ -28,7 +28,12 @@ async def process_vd_upload(
     clear_contextvars()
     auditor = get_auditor(team_id)
 
-    bind_contextvars(team_id=str(team_id), cp_name=vds.cp_name, endpoint="VDS upload")
+    bind_contextvars(
+        team_id=str(team_id),
+        cp_name=vds.cp_name,
+        endpoint="VDS upload",
+        run_id=str(v.get("run_id")),
+    )
     auditor.push_context(cp_name=vds.cp_name)
 
     if v.get_bool("mock_mode"):

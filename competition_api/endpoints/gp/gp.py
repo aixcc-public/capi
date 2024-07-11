@@ -28,7 +28,9 @@ async def process_gp_upload(
     clear_contextvars()
     auditor = get_auditor(team_id)
 
-    bind_contextvars(team_id=str(team_id), endpoint="GP upload")
+    bind_contextvars(
+        team_id=str(team_id), endpoint="GP upload", run_id=str(v.get("run_id"))
+    )
 
     if v.get_bool("mock_mode"):
         await auditor.emit(EventType.MOCK_RESPONSE)
