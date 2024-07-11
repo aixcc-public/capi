@@ -17,6 +17,18 @@ from .types import (
 )
 
 
+class CompetitionStartEvent(BaseModel):
+    """The competition has officially begun, at this timestamp."""
+
+    timestamp: datetime
+
+
+class CompetitionStopEvent(BaseModel):
+    """The competition has officially stopped, at this timestamp."""
+
+    timestamp: datetime
+
+
 class TimeoutEvent(BaseModel):
     """One of the tests timed out before completing."""
 
@@ -160,11 +172,14 @@ class VDSanitizerResultEvent(VDEvent):
 
 
 class EventWrapper(BaseModel):
-    schema_version: str = "1.0.0"
+    schema_version: str = "1.0.1"
+    run_id: UUID
     team_id: UUID
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     event_type: EventType
     event: Union[
+        CompetitionStartEvent,
+        CompetitionStopEvent,
         GPFunctionalTestsPass,
         GPPatchBuiltEvent,
         GPSanitizerDidNotFire,

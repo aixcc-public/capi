@@ -7,7 +7,13 @@ from vyper import v
 
 from competition_api.config import init_vyper
 from competition_api.cp_registry import CPRegistry
-from competition_api.endpoints import GPRouter, HealthRouter, MetadataRouter, VDSRouter
+from competition_api.endpoints import (
+    AuditRouter,
+    GPRouter,
+    HealthRouter,
+    MetadataRouter,
+    VDSRouter,
+)
 from competition_api.logging import logging_middleware, setup_logging
 
 LOGGER = get_logger()
@@ -61,5 +67,5 @@ app = FastAPI(
 
 app.middleware("http")(logging_middleware)
 
-for router in [GPRouter, VDSRouter, HealthRouter, MetadataRouter]:
+for router in [GPRouter, VDSRouter, HealthRouter, MetadataRouter, AuditRouter]:
     app.include_router(router)

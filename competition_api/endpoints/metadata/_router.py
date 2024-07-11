@@ -5,8 +5,6 @@ from competition_api.models import MetadataResponse
 
 router = APIRouter()
 
-v.set_default("run_id", "00000000-0000-0000-0000-000000000000")
-
 
 @router.get("/metadata/", tags=["metadata"])
 async def metadata() -> MetadataResponse:

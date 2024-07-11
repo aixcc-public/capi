@@ -182,6 +182,20 @@ def audit_sink():
 
 
 @pytest.fixture
+async def admin_creds(db_config):
+    async with db_session() as db:
+        return await Token.upsert(db, admin=True)
+
+
+@pytest.fixture
+def admin_auth_header(admin_creds):
+    creds = base64.b64encode(
+        f"{admin_creds[0]}:{admin_creds[1]}".encode("utf8")
+    ).decode("utf8")
+    return {"Authorization": f"Basic {creds}"}
+
+
+@pytest.fixture
 async def creds(db_config):
     async with db_session() as db:
         return await Token.upsert(db)

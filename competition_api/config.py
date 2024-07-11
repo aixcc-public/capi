@@ -30,3 +30,4 @@ def init_vyper():
     generate_config()
 
     v.set_default("scoring.reject_duplicate_vds", True)
+    v.set_default("run_id", "00000000-0000-0000-0000-000000000000")

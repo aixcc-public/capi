@@ -16,7 +16,13 @@ async def auth_preload():
         async with create_async_sadlock(db, "user_preload"):
             for token_id, token in v.get("auth.preload").items():
                 await LOGGER.ainfo("Preloading auth for %s", token_id)
-                await Token.upsert(db, token_id=token_id, token=token)
+                kwargs = {"token_id": token_id, "token": token}
+
+                if token_id in v.get("auth.admins"):
+                    await LOGGER.awarning("Inserting %s as admin", token_id)
+                    kwargs["admin"] = True
+
+                await Token.upsert(db, **kwargs)
 
 
 def main():

@@ -6,6 +6,8 @@ from structlog.stdlib import get_logger
 from vyper import v
 
 from .models import (
+    CompetitionStartEvent,
+    CompetitionStopEvent,
     EventWrapper,
     GPFunctionalTestsPass,
     GPPatchBuiltEvent,
@@ -31,6 +33,8 @@ v.set_default("audit.file", "/var/log/capi/audit.log")
 
 
 EVENTS = {
+    EventType.COMPETITION_START: CompetitionStartEvent,
+    EventType.COMPETITION_STOP: CompetitionStopEvent,
     EventType.DUPLICATE_GP_SUBMISSION_FOR_CPV_UUID: GPSubmissionDuplicateCPVEvent,
     EventType.GP_FUNCTIONAL_TESTS_PASS: GPFunctionalTestsPass,
     EventType.GP_PATCH_BUILT: GPPatchBuiltEvent,
@@ -70,6 +74,7 @@ class Auditor:
     async def emit(self, event_type: EventType, **kwargs):
         wrapped = EventWrapper(
             team_id=self._team_id,
+            run_id=v.get("run_id"),
             event_type=event_type,
             event=EVENTS[event_type](**self._context, **kwargs),
         )

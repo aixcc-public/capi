@@ -3,7 +3,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import argon2
-from sqlalchemy import String, Uuid, select
+from sqlalchemy import Boolean, String, Uuid, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 from sqlalchemy.orm import Mapped, mapped_column
@@ -23,15 +23,20 @@ class Token(Base):
         Uuid, primary_key=True, default=uuid4
     )  # pylint: disable=redefined-builtin
     token: Mapped[str] = mapped_column("token", String, nullable=True)
+    admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     @classmethod
     async def upsert(
-        cls, db: AsyncConnection, token_id: UUID | None = None, token: str | None = None
+        cls,
+        db: AsyncConnection,
+        token_id: UUID | None = None,
+        token: str | None = None,
+        admin: bool = False,
     ) -> tuple[UUID, str]:
         token = (
             token if token is not None else secrets.token_urlsafe(GENERATED_TOKEN_LEN)
         )
-        values: dict[str, Any] = {"token": HASHER.hash(token)}
+        values: dict[str, Any] = {"token": HASHER.hash(token), "admin": admin}
 
         if token_id:
             values["id"] = token_id
