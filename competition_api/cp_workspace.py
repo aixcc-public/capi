@@ -8,6 +8,8 @@ from typing import Any
 from git import Repo
 from structlog.stdlib import get_logger
 
+from competition_api.audit import Auditor
+from competition_api.audit.types import EventType, TimeoutContext
 from competition_api.cp_registry import CPRegistry
 from competition_api.flatfile import Flatfile
 
@@ -18,7 +20,7 @@ class BadReturnCode(Exception):
     pass
 
 
-async def run(func, *args, stdin=None, **kwargs):
+async def run(func, *args, stdin=None, timeout=3600, **kwargs):
     await LOGGER.adebug("%s %s %s", func, args, kwargs)
     proc = await asyncio.create_subprocess_exec(
         func,
@@ -28,9 +30,12 @@ async def run(func, *args, stdin=None, **kwargs):
         stdin=asyncio.subprocess.PIPE if stdin else None,
         **kwargs,
     )
-    stdout, stderr = await proc.communicate(
-        input=stdin.encode("utf8") if stdin else None
+
+    stdout, stderr = await asyncio.wait_for(
+        proc.communicate(input=stdin.encode("utf8") if stdin else None),
+        timeout=timeout,
     )
+
     return_code = proc.returncode
 
     # Program outputs may not be decodeable when POV blobs are passed to them
@@ -41,16 +46,17 @@ async def run(func, *args, stdin=None, **kwargs):
 
 
 class CPWorkspace(contextlib.AbstractAsyncContextManager):
-    def __init__(self, cp_name: str):
+    def __init__(self, cp_name: str, auditor: Auditor):
         cp = CPRegistry.instance().get(cp_name)
         if cp is None:
             raise ValueError(f"cp_name {cp_name} does not exist")
+        self.auditor = auditor
         self.cp = cp
-        self.workdir: Path
         self.project_yaml: dict[str, Any]
         self.repo: Repo
-        self.src_repo: Repo | None
         self.run_env: dict[str, str]
+        self.src_repo: Repo | None
+        self.workdir: Path
 
     async def __aenter__(self):
         # Make working copies
@@ -121,25 +127,36 @@ class CPWorkspace(contextlib.AbstractAsyncContextManager):
             "Workspace: build" + (f" with patch {patch_sha256}" if patch_sha256 else "")
         )
 
-        if patch_sha256 is None:
-            return_code, _, _ = await run(
-                "./run.sh", "-x", "-v", "build", cwd=self.workdir, env=self.run_env
-            )
+        try:
+            if patch_sha256 is None:
+                return_code, _, _ = await run(
+                    "./run.sh",
+                    "-x",
+                    "-v",
+                    "build",
+                    cwd=self.workdir,
+                    env=self.run_env,
+                    timeout=600,
+                )
 
-        else:
-            patch = Flatfile(contents_hash=patch_sha256)
-            return_code, _, _ = await run(
-                "./run.sh",
-                "-x",
-                "-v",
-                "build",
-                patch.filename,
-                source,
-                cwd=self.workdir,
-                env=self.run_env,
-            )
+            else:
+                patch = Flatfile(contents_hash=patch_sha256)
+                return_code, _, _ = await run(
+                    "./run.sh",
+                    "-x",
+                    "-v",
+                    "build",
+                    patch.filename,
+                    source,
+                    cwd=self.workdir,
+                    env=self.run_env,
+                    timeout=600,
+                )
 
-        return return_code == 0
+            return return_code == 0
+        except TimeoutError:
+            await self.auditor.emit(EventType.TIMEOUT, context=TimeoutContext.BUILD)
+            return False
 
     async def check_sanitizers(self, blob_sha256: str, harness: str) -> set[str]:
         blob = Flatfile(contents_hash=blob_sha256)
@@ -149,16 +166,23 @@ class CPWorkspace(contextlib.AbstractAsyncContextManager):
             blob.sha256,
         )
 
-        return_code, _, _ = await run(
-            "./run.sh",
-            "-x",
-            "-v",
-            "run_pov",
-            blob.filename,
-            self.harness(harness),
-            cwd=self.workdir,
-            env=self.run_env,
-        )
+        try:
+            return_code, _, _ = await run(
+                "./run.sh",
+                "-x",
+                "-v",
+                "run_pov",
+                blob.filename,
+                self.harness(harness),
+                cwd=self.workdir,
+                env=self.run_env,
+                timeout=600,
+            )
+        except TimeoutError as exc:
+            await self.auditor.emit(
+                EventType.TIMEOUT, context=TimeoutContext.CHECK_SANITIZERS
+            )
+            raise BadReturnCode from exc
 
         if return_code != 0:
             raise BadReturnCode
@@ -189,7 +213,19 @@ class CPWorkspace(contextlib.AbstractAsyncContextManager):
 
     async def run_functional_tests(self) -> bool:
         await LOGGER.adebug("Workspace: run tests")
-        return_code, _, _ = await run(
-            "./run.sh", "-x", "-v", "run_tests", cwd=self.workdir, env=self.run_env
-        )
-        return return_code == 0
+        try:
+            return_code, _, _ = await run(
+                "./run.sh",
+                "-x",
+                "-v",
+                "run_tests",
+                cwd=self.workdir,
+                env=self.run_env,
+                timeout=600,
+            )
+            return return_code == 0
+        except TimeoutError:
+            await self.auditor.emit(
+                EventType.TIMEOUT, context=TimeoutContext.RUN_FUNCTIONAL_TESTS
+            )
+            return False

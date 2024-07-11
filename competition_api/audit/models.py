@@ -11,9 +11,23 @@ from .types import (
     EventType,
     GPSubmissionFailReason,
     GPSubmissionInvalidReason,
+    TimeoutContext,
     VDSubmissionFailReason,
     VDSubmissionInvalidReason,
 )
+
+
+class TimeoutEvent(BaseModel):
+    """One of the tests timed out before completing."""
+
+    disposition: Disposition = Disposition.BAD
+
+    cp_name: str
+    context: TimeoutContext
+
+    vd_uuid: UUID | None = None
+    gp_uuid: UUID | None = None
+    cpv_uuid: UUID | None = None
 
 
 class MockResponseEvent(BaseModel):
@@ -160,6 +174,7 @@ class EventWrapper(BaseModel):
         GPSubmissionInvalidEvent,
         GPSubmissionSuccessEvent,
         MockResponseEvent,
+        TimeoutEvent,
         VDSanitizerResultEvent,
         VDSubmissionEvent,
         VDSubmissionFailEvent,

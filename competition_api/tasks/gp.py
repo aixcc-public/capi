@@ -27,7 +27,7 @@ async def check_gp(
     # Make sure there is only one test going at a time for each (team id, cpv_uuid)
     async with db_session() as db, create_async_sadlock(
         db, f"{vds.team_id}-{vds.cpv_uuid}"
-    ), CPWorkspace(vds.cp_name) as workspace:
+    ), CPWorkspace(vds.cp_name, auditor) as workspace:
         # ARQ uses an at-least-once job execution model
         if (
             await db.execute(

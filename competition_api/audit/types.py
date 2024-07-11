@@ -39,6 +39,12 @@ class VDSubmissionFailReason(Enum):
     SANITIZER_FIRED_BEFORE_COMMIT = "sanitizer_fired_before_commit"
 
 
+class TimeoutContext(Enum):
+    BUILD = "build"
+    CHECK_SANITIZERS = "check_sanitizers"
+    RUN_FUNCTIONAL_TESTS = "run_functional_tests"
+
+
 class EventType(Enum):
     DUPLICATE_GP_SUBMISSION_FOR_CPV_UUID = "duplicate_gp_submission_for_cpv_uuid"
     GP_SUBMISSION = "gp_submission"
@@ -48,6 +54,7 @@ class EventType(Enum):
     GP_FUNCTIONAL_TESTS_PASS = "gp_functional_tests_pass"
     GP_SANITIZER_DID_NOT_FIRE = "gp_sanitizer_did_not_fire"
     GP_SUBMISSION_SUCCESS = "gp_submission_success"
+    TIMEOUT = "timeout"
     VD_SANITIZER_RESULT = "vd_sanitizer_result"
     VD_SUBMISSION = "vd_submission"
     VD_SUBMISSION_FAIL = "vd_submission_failed"

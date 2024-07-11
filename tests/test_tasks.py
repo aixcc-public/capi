@@ -36,14 +36,21 @@ def build_mock_run(
     tests_returncode=0,
     pov_returncode=0,
     container_name="",
+    raises_timeout=None,
 ):
-    def mock_run(func, *args, cwd=None, stdin=None, env=None):
+    raises_timeout = raises_timeout or []
+
+    def mock_run(func, *args, cwd=None, stdin=None, env=None, timeout=3600):
+
         if func == "./run.sh":
             assert args[0:2] == (
                 "-x",
                 "-v",
             ), f"./run.sh was not called with -x and -v: got {args[0:2]}"
             args = args[2:]
+
+            if args[0] in raises_timeout:
+                raise TimeoutError
 
             if args[0] == "build":
                 if gp_patch:
@@ -60,6 +67,7 @@ def build_mock_run(
 
                 # make sure we're not trying to build a patch now
                 assert len(args) == 1, f"Args too long: {args}"
+
                 return (0, "".encode("utf8"), "".encode("utf8"))
 
             if args[0] == "run_pov":
@@ -93,6 +101,7 @@ def build_mock_run(
 
             if args[0] == "run_tests":
                 assert len(args) == 1, f"Args too long: {args}"
+
                 return (tests_returncode, "".encode("utf8"), "".encode("utf8"))
 
             assert False, f"run() was called for an unsupported case: {func} {args}"
@@ -127,33 +136,49 @@ def build_mock_run(
 class TestTestVDS:
     @staticmethod
     @pytest.mark.parametrize(
-        "expected_event_type,fail_reason,sanitizer_fires,source",
+        "expected_event_type,fail_reason,sanitizer_fires,source,raises_timeout",
         [
             (
                 EventType.VD_SUBMISSION_FAIL,
                 [VDSubmissionFailReason.SANITIZER_FIRED_BEFORE_COMMIT],
                 [True, True, True],
                 "primary",
+                [],
             ),
-            (EventType.VD_SUBMISSION_SUCCESS, None, [True, True, False], "primary"),
+            (
+                EventType.VD_SUBMISSION_SUCCESS,
+                None,
+                [True, True, False],
+                "primary",
+                [],
+            ),
             (
                 EventType.VD_SUBMISSION_SUCCESS,
                 None,
                 [True, True, False],
                 "secondary/nested-folder",
+                [],
             ),
-            (EventType.VD_SUBMISSION_SUCCESS, None, [True, True, False], "tertiary"),
+            (
+                EventType.VD_SUBMISSION_SUCCESS,
+                None,
+                [True, True, False],
+                "tertiary",
+                [],
+            ),
             (
                 EventType.VD_SUBMISSION_FAIL,
                 [VDSubmissionFailReason.SANITIZER_DID_NOT_FIRE_AT_COMMIT],
                 [True, False, False],
                 "primary",
+                [],
             ),
             (
                 EventType.VD_SUBMISSION_FAIL,
                 [VDSubmissionFailReason.SANITIZER_DID_NOT_FIRE_AT_HEAD],
                 [False, True, False],
                 "primary",
+                [],
             ),
             (
                 EventType.VD_SUBMISSION_FAIL,
@@ -164,6 +189,7 @@ class TestTestVDS:
                 ],
                 [False, False, True],
                 "primary",
+                [],
             ),
             (
                 EventType.VD_SUBMISSION_FAIL,
@@ -173,6 +199,7 @@ class TestTestVDS:
                 ],
                 [False, True, True],
                 "primary",
+                [],
             ),
             (
                 EventType.VD_SUBMISSION_FAIL,
@@ -182,6 +209,7 @@ class TestTestVDS:
                 ],
                 [True, False, True],
                 "primary",
+                [],
             ),
             (
                 EventType.VD_SUBMISSION_FAIL,
@@ -191,18 +219,35 @@ class TestTestVDS:
                 ],
                 [False, False, False],
                 "primary",
+                [],
             ),
             (
                 EventType.VD_SUBMISSION_INVALID,
                 VDSubmissionInvalidReason.SUBMITTED_INITIAL_COMMIT,
                 [True, True, False],
                 "primary",
+                [],
             ),
             (
                 EventType.VD_SUBMISSION_FAIL,
                 [VDSubmissionFailReason.RUN_POV_FAILED],
                 [True, True, False],
                 "primary",
+                [],
+            ),
+            (
+                EventType.VD_SUBMISSION_FAIL,
+                [VDSubmissionFailReason.RUN_POV_FAILED],
+                [True, True, False],
+                "primary",
+                ["build"],
+            ),
+            (
+                EventType.VD_SUBMISSION_FAIL,
+                [VDSubmissionFailReason.RUN_POV_FAILED],
+                [True, True, False],
+                "primary",
+                ["run_pov"],
             ),
         ],
     )
@@ -216,6 +261,7 @@ class TestTestVDS:
         fail_reason,
         sanitizer_fires,
         source,
+        raises_timeout,
     ):
         fail_test = expected_event_type == EventType.VD_SUBMISSION_FAIL
         invalid_test = expected_event_type == EventType.VD_SUBMISSION_INVALID
@@ -264,14 +310,17 @@ class TestTestVDS:
                 pov_returncode=(
                     1 if fail_reason == [VDSubmissionFailReason.RUN_POV_FAILED] else 0
                 ),
+                raises_timeout=raises_timeout,
             ),
         ), mock.patch(
             "competition_api.cp_workspace.CPWorkspace.checkout"
         ) as mock_checkout:
             await check_vds(None, vds, auditor)
-            if not invalid_test and fail_reason != [
-                VDSubmissionFailReason.RUN_POV_FAILED
-            ]:
+            if (
+                not invalid_test
+                and fail_reason != [VDSubmissionFailReason.RUN_POV_FAILED]
+                and not raises_timeout
+            ):
                 mock_checkout.assert_has_calls(
                     [
                         mock.call(
@@ -281,6 +330,10 @@ class TestTestVDS:
                         mock.call(f"{target_commit}~1".upper()),
                     ]
                 )
+
+        if raises_timeout:
+            event = auditor.get_events(EventType.TIMEOUT)
+            assert event
 
         event = auditor.get_events(expected_event_type)
         assert event
@@ -399,28 +452,33 @@ class TestTestVDS:
 class TestTestGP:
     @staticmethod
     @pytest.mark.parametrize(
-        "patch_builds,functional_tests_pass,sanitizer_does_not_fire,pov_works,source",
+        (
+            "patch_builds,functional_tests_pass,sanitizer_does_not_fire,"
+            "pov_works,source,raises_timeout"
+        ),
         [
-            (True, True, True, True, "primary"),
-            (True, True, True, True, "secondary/nested-folder"),
-            (True, True, True, True, "tertiary"),
-            (True, True, False, True, "primary"),
-            (True, False, True, True, "primary"),
-            (True, False, False, True, "primary"),
-            (False, True, True, True, "primary"),
-            (False, True, False, True, "primary"),
-            (False, False, True, True, "primary"),
-            (False, False, False, True, "primary"),
-            (True, True, True, False, "primary"),
-            (True, True, True, False, "secondary/nested-folder"),
-            (True, True, True, False, "tertiary"),
-            (True, True, False, False, "primary"),
-            (True, False, True, False, "primary"),
-            (True, False, False, False, "primary"),
-            (False, True, True, False, "primary"),
-            (False, True, False, False, "primary"),
-            (False, False, True, False, "primary"),
-            (False, False, False, False, "primary"),
+            (True, True, True, True, "primary", []),
+            (True, True, True, True, "secondary/nested-folder", []),
+            (True, True, True, True, "tertiary", []),
+            (True, True, False, True, "primary", []),
+            (True, False, True, True, "primary", []),
+            (True, False, False, True, "primary", []),
+            (False, True, True, True, "primary", []),
+            (False, True, False, True, "primary", []),
+            (False, False, True, True, "primary", []),
+            (False, False, False, True, "primary", []),
+            (True, True, True, False, "primary", []),
+            (True, True, True, False, "secondary/nested-folder", []),
+            (True, True, True, False, "tertiary", []),
+            (True, True, False, False, "primary", []),
+            (True, False, True, False, "primary", []),
+            (True, False, False, False, "primary", []),
+            (False, True, True, False, "primary", []),
+            (False, True, False, False, "primary", []),
+            (False, False, True, False, "primary", []),
+            (False, False, False, False, "primary", []),
+            (True, False, True, True, "primary", ["run_tests"]),
+            (False, True, True, True, "primary", ["build"]),
         ],
     )
     async def test_check_gp(
@@ -435,6 +493,7 @@ class TestTestGP:
         source,
         test_project_yaml,
         creds,
+        raises_timeout,
     ):
         src_repo = Repo(Path(repo.working_dir) / "src" / source)
         async with db_session() as db:
@@ -492,6 +551,7 @@ class TestTestGP:
                 tests_returncode=0 if functional_tests_pass else 1,
                 pov_returncode=0 if pov_works else 1,
                 container_name=test_project_yaml["docker_image"],
+                raises_timeout=raises_timeout,
             ),
         ):
             await check_gp(None, vds, gp, auditor)
@@ -499,6 +559,8 @@ class TestTestGP:
         if patch_builds:
             assert auditor.get_events(EventType.GP_PATCH_BUILT)
         else:
+            if "build" in raises_timeout:
+                assert auditor.get_events(EventType.TIMEOUT)
             assert not auditor.get_events(EventType.GP_PATCH_BUILT)
             fail = auditor.get_events(EventType.GP_SUBMISSION_FAIL)
             assert fail
@@ -508,6 +570,8 @@ class TestTestGP:
         if functional_tests_pass:
             assert auditor.get_events(EventType.GP_FUNCTIONAL_TESTS_PASS)
         else:
+            if "run_tests" in raises_timeout:
+                assert auditor.get_events(EventType.TIMEOUT)
             assert not auditor.get_events(EventType.GP_FUNCTIONAL_TESTS_PASS)
             fail = auditor.get_events(EventType.GP_SUBMISSION_FAIL)
             assert fail

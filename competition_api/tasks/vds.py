@@ -30,7 +30,7 @@ async def check_vds(_ctx, vds: VulnerabilityDiscovery, auditor: Auditor):
     # Make sure there is only one test going at a time for each (team id, commit hash)
     async with db_session() as db, create_async_sadlock(
         db, f"{vds.team_id}-{vds.pou_commit_sha1}"
-    ), CPWorkspace(vds.cp_name) as workspace:
+    ), CPWorkspace(vds.cp_name, auditor) as workspace:
         # ARQ uses an at-least-once job execution model
         if (
             await db.execute(
