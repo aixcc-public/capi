@@ -89,13 +89,14 @@ async def process_vd_upload(
         sanitizer=db_row.pou_sanitizer,
     )
 
-    await task_pool.enqueue_job(
+    job_id = "{capijobs}" + f"check-vds-{db_row.id}"
+    enqueued = await task_pool.enqueue_job(
         "check_vds",
         db_row,
         auditor,
-        _job_id="{capijobs}"
-        + f"check-vds-{team_id}-{vds.cp_name}-{vds.pou.commit_sha1}-{blob.sha256}",
     )
+    if not enqueued:
+        await LOGGER.awarning("Job with ID %s was already enqueued", job_id)
 
     return VDSResponse(
         status=db_row.status,

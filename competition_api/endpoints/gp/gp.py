@@ -111,14 +111,12 @@ async def process_gp_upload(
         await db.execute(select(GeneratedPatch).where(GeneratedPatch.id == gp_row.id))
     ).fetchall()[0][0]
 
-    await task_pool.enqueue_job(
-        "check_gp",
-        vds,
-        gp_row,
-        auditor,
-        _job_id="{capijobs}"
-        + f"check-gp-{team_id}-{vds.cp_name}-{vds.pou_commit_sha1}-{patch.sha256}",
+    job_id = "{capijobs}" + f"check-gp-{gp_row.id}"
+    enqueued = await task_pool.enqueue_job(
+        "check_gp", vds, gp_row, auditor, _job_id=job_id
     )
+    if not enqueued:
+        await LOGGER.awarning("Job with ID %s was already enqueued", job_id)
 
     return GPResponse(
         status=gp_row.status,
