@@ -42,6 +42,15 @@ class TimeoutEvent(BaseModel):
     cpv_uuid: UUID | None = None
 
 
+class CPOutputArchived(BaseModel):
+    """cAPI stored the outputs of a call to ./run.sh"""
+
+    filename: str
+    return_code: int | None
+    cp_name: str
+    command: str
+
+
 class MockResponseEvent(BaseModel):
     """Emitted if the cAPI is operating in mock mode."""
 
@@ -178,6 +187,7 @@ class EventWrapper(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     event_type: EventType
     event: Union[
+        CPOutputArchived,
         CompetitionStartEvent,
         CompetitionStopEvent,
         GPFunctionalTestsPass,

@@ -8,6 +8,7 @@ from vyper import v
 from .models import (
     CompetitionStartEvent,
     CompetitionStopEvent,
+    CPOutputArchived,
     EventWrapper,
     GPFunctionalTestsPass,
     GPPatchBuiltEvent,
@@ -33,6 +34,7 @@ v.set_default("audit.file", "/var/log/capi/audit.log")
 
 
 EVENTS = {
+    EventType.CP_OUTPUT_ARCHIVED: CPOutputArchived,
     EventType.COMPETITION_START: CompetitionStartEvent,
     EventType.COMPETITION_STOP: CompetitionStopEvent,
     EventType.DUPLICATE_GP_SUBMISSION_FOR_CPV_UUID: GPSubmissionDuplicateCPVEvent,

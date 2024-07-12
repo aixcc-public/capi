@@ -46,6 +46,7 @@ class TimeoutContext(Enum):
 
 
 class EventType(Enum):
+    CP_OUTPUT_ARCHIVED = "cp_output_archived"
     COMPETITION_START = "competition_start"
     COMPETITION_STOP = "competition_stop"
     DUPLICATE_GP_SUBMISSION_FOR_CPV_UUID = "duplicate_gp_submission_for_cpv_uuid"

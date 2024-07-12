@@ -11,7 +11,7 @@ from structlog.stdlib import get_logger
 from competition_api.audit import Auditor
 from competition_api.audit.types import EventType, TimeoutContext
 from competition_api.cp_registry import CPRegistry
-from competition_api.flatfile import Flatfile
+from competition_api.flatfile import Flatfile, archived_tarball
 
 LOGGER = get_logger(__name__)
 
@@ -45,13 +45,17 @@ async def run(func, *args, stdin=None, timeout=3600, **kwargs):
     return return_code, stdout, stderr
 
 
-class CPWorkspace(contextlib.AbstractAsyncContextManager):
-    def __init__(self, cp_name: str, auditor: Auditor):
+class CPWorkspace(
+    contextlib.AbstractAsyncContextManager
+):  # pylint: disable=too-many-instance-attributes
+    def __init__(self, cp_name: str, auditor: Auditor, artifact_key: str):
         cp = CPRegistry.instance().get(cp_name)
         if cp is None:
             raise ValueError(f"cp_name {cp_name} does not exist")
         self.auditor = auditor
+        self.artifact_key = artifact_key
         self.cp = cp
+        self.cp_name = cp_name
         self.project_yaml: dict[str, Any]
         self.repo: Repo
         self.run_env: dict[str, str]
@@ -92,6 +96,50 @@ class CPWorkspace(contextlib.AbstractAsyncContextManager):
     async def __aexit__(self, _exc_type, _exc, _tb):
         shutil.rmtree(self.workdir, ignore_errors=True)
 
+    @property
+    def output_dir(self) -> Path:
+        return self.workdir / "out" / "output"
+
+    def command_output_dir(self, command) -> Path | None:
+        try:
+            dirname = [
+                p
+                for p in sorted(os.listdir(self.output_dir), reverse=True)
+                if p.endswith(command)
+            ][0]
+            path = self.output_dir / dirname
+
+            if not os.path.isdir(path):
+                return None
+
+            return path
+
+        except (FileNotFoundError, IndexError):
+            return None
+
+    async def archive_output(
+        self, auditor: Auditor, return_code: int | None, command: str
+    ):
+        path = self.command_output_dir(command)
+        if path is None:
+            await LOGGER.ainfo("No output produced for command %s", command)
+            return
+        async with archived_tarball(
+            prefix=f"output-{self.artifact_key}-{self.cp_name}-{command}-"
+        ) as tarball:
+            tarball.add(path, arcname=path.name)
+
+            if tarball.name is None:
+                # should never happen, this makes mypy happy
+                raise RuntimeError("Tarball's filename was None")
+
+            await auditor.emit(
+                EventType.CP_OUTPUT_ARCHIVED,
+                return_code=return_code,
+                filename=os.path.basename(tarball.name),
+                command=command,
+            )
+
     def set_src_repo(self, ref: str):
         source = self.cp.source_from_ref(ref)
 
@@ -123,8 +171,10 @@ class CPWorkspace(contextlib.AbstractAsyncContextManager):
         LOGGER.debug("Checked out %s", self.current_commit())
 
     async def build(self, source: str, patch_sha256: str | None = None) -> bool:
+        command = "build"
         await LOGGER.adebug(
-            "Workspace: build" + (f" with patch {patch_sha256}" if patch_sha256 else "")
+            f"Workspace: {command}"
+            + (f" with patch {patch_sha256}" if patch_sha256 else "")
         )
 
         try:
@@ -133,7 +183,7 @@ class CPWorkspace(contextlib.AbstractAsyncContextManager):
                     "./run.sh",
                     "-x",
                     "-v",
-                    "build",
+                    command,
                     cwd=self.workdir,
                     env=self.run_env,
                     timeout=600,
@@ -145,7 +195,7 @@ class CPWorkspace(contextlib.AbstractAsyncContextManager):
                     "./run.sh",
                     "-x",
                     "-v",
-                    "build",
+                    command,
                     patch.filename,
                     source,
                     cwd=self.workdir,
@@ -153,6 +203,7 @@ class CPWorkspace(contextlib.AbstractAsyncContextManager):
                     timeout=600,
                 )
 
+            await self.archive_output(self.auditor, return_code, command)
             return return_code == 0
         except TimeoutError:
             await self.auditor.emit(EventType.TIMEOUT, context=TimeoutContext.BUILD)
@@ -166,12 +217,13 @@ class CPWorkspace(contextlib.AbstractAsyncContextManager):
             blob.sha256,
         )
 
+        command = "run_pov"
         try:
             return_code, _, _ = await run(
                 "./run.sh",
                 "-x",
                 "-v",
-                "run_pov",
+                command,
                 blob.filename,
                 self.harness(harness),
                 cwd=self.workdir,
@@ -187,42 +239,42 @@ class CPWorkspace(contextlib.AbstractAsyncContextManager):
         if return_code != 0:
             raise BadReturnCode
 
-        output_dir = self.workdir / "out" / "output"
-
-        pov_output_path = [
-            p
-            for p in sorted(os.listdir(output_dir), reverse=True)
-            if p.endswith("run_pov")
-        ][0]
+        await self.archive_output(self.auditor, return_code, command)
+        pov_output_path = self.command_output_dir(command)
 
         triggered: set[str] = set()
-        for file in [
-            output_dir / pov_output_path / "stderr.log",
-            output_dir / pov_output_path / "stdout.log",
-        ]:
-            try:
-                with open(file, "r", encoding="utf8") as f:
-                    for line in f:
-                        for key, sanitizer in self.project_yaml["sanitizers"].items():
-                            if sanitizer in line:
-                                triggered.add(key)
-            except FileNotFoundError:
-                await LOGGER.awarning("%s not found", file)
+        if pov_output_path is not None:
+            for file in [
+                pov_output_path / "stderr.log",
+                pov_output_path / "stdout.log",
+            ]:
+                try:
+                    with open(file, "r", encoding="utf8") as f:
+                        for line in f:
+                            for key, sanitizer in self.project_yaml[
+                                "sanitizers"
+                            ].items():
+                                if sanitizer in line:
+                                    triggered.add(key)
+                except FileNotFoundError:
+                    await LOGGER.awarning("%s not found", file)
 
         return triggered
 
     async def run_functional_tests(self) -> bool:
         await LOGGER.adebug("Workspace: run tests")
         try:
+            command = "run_tests"
             return_code, _, _ = await run(
                 "./run.sh",
                 "-x",
                 "-v",
-                "run_tests",
+                command,
                 cwd=self.workdir,
                 env=self.run_env,
                 timeout=600,
             )
+            await self.archive_output(self.auditor, return_code, command)
             return return_code == 0
         except TimeoutError:
             await self.auditor.emit(

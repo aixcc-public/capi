@@ -9,7 +9,7 @@ class TestCPWorkspace:
     @staticmethod
     async def test_init(test_project_yaml, repo):
         async with CPWorkspace(
-            test_project_yaml["cp_name"], Auditor(uuid4())
+            test_project_yaml["cp_name"], Auditor(uuid4()), str(uuid4())
         ) as workspace:
             assert workspace.workdir
             assert workspace.project_yaml == test_project_yaml

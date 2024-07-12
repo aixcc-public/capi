@@ -60,12 +60,12 @@ COPY competition_api /code/competition_api/
 RUN poetry install
 
 # disables pyc files
-ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONDONTWRITEBYTECODE=1
 
 # disables buffering stdout and stderr
-ENV PYTHONUNBUFFERED 1
+ENV PYTHONUNBUFFERED=1
 
-ENV AIXCC_PORT 8080
+ENV AIXCC_PORT=8080
 
 HEALTHCHECK --interval=5s --retries=30 --start-period=3s --timeout=5s \
     CMD curl --fail http://localhost:${AIXCC_PORT} || exit 1

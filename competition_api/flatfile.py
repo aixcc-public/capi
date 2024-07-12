@@ -1,6 +1,9 @@
+import contextlib
 import os
+import tarfile
 from hashlib import sha256
 from pathlib import Path
+from uuid import uuid4
 
 from aiofile import async_open
 from structlog.stdlib import get_logger
@@ -44,3 +47,17 @@ class Flatfile:
         async with async_open(self.filename, "rb") as f:
             self._contents = await f.read()
             return self._contents
+
+
+@contextlib.asynccontextmanager
+async def archived_tarball(prefix="output-"):
+    archive_dir = Path(v.get("flatfile_dir")) / "output"
+    os.makedirs(archive_dir, exist_ok=True)
+    filename: str | None = None
+
+    while filename is None or os.path.exists(archive_dir / filename):
+        filename = f"{prefix}{uuid4()}.tar.xz"
+
+    await LOGGER.ainfo("Creating new tarball at %s", filename)
+    with tarfile.open(archive_dir / filename, "w:xz") as tar:
+        yield tar
