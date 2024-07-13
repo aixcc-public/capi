@@ -2,16 +2,20 @@ import asyncio
 import contextlib
 import os
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
 from git import Repo
+from redis.asyncio import Redis
 from structlog.stdlib import get_logger
+from vyper import v
 
 from competition_api.audit import Auditor
 from competition_api.audit.types import EventType, TimeoutContext
 from competition_api.cp_registry import CPRegistry
-from competition_api.flatfile import Flatfile, archived_tarball
+from competition_api.flatfile import Flatfile, StorageType, archived_tarball
+from competition_api.tasks.results import Archive, OutputMessage, OutputType
 
 LOGGER = get_logger(__name__)
 
@@ -48,10 +52,11 @@ async def run(func, *args, stdin=None, timeout=3600, **kwargs):
 class CPWorkspace(
     contextlib.AbstractAsyncContextManager
 ):  # pylint: disable=too-many-instance-attributes
-    def __init__(self, cp_name: str, auditor: Auditor, artifact_key: str):
+    def __init__(self, cp_name: str, auditor: Auditor, artifact_key: str, redis: Redis):
         cp = CPRegistry.instance().get(cp_name)
         if cp is None:
             raise ValueError(f"cp_name {cp_name} does not exist")
+        self.redis = redis
         self.auditor = auditor
         self.artifact_key = artifact_key
         self.cp = cp
@@ -124,21 +129,36 @@ class CPWorkspace(
         if path is None:
             await LOGGER.ainfo("No output produced for command %s", command)
             return
-        async with archived_tarball(
-            prefix=f"output-{self.artifact_key}-{self.cp_name}-{command}-"
-        ) as tarball:
-            tarball.add(path, arcname=path.name)
+        with tempfile.TemporaryDirectory() as tempdir:
+            filename: str | None = None
+            async with archived_tarball(
+                tempdir, prefix=f"output-{self.artifact_key}-{self.cp_name}-{command}-"
+            ) as tarball:
+                tarball.add(path, arcname=path.name)
+                filename = str(tarball.name)
 
-            if tarball.name is None:
-                # should never happen, this makes mypy happy
-                raise RuntimeError("Tarball's filename was None")
+            with open(filename, mode="rb") as file:
+                flatfile = Flatfile(contents=file.read())
+                await flatfile.write(to=StorageType.AZUREBLOB)
 
-            await auditor.emit(
-                EventType.CP_OUTPUT_ARCHIVED,
-                return_code=return_code,
-                filename=os.path.basename(tarball.name),
-                command=command,
-            )
+                common_kwargs = {
+                    "sha256": flatfile.sha256,
+                    "filename": os.path.basename(filename),
+                }
+                await self.redis.publish(
+                    v.get("redis.channels.results"),
+                    OutputMessage(
+                        message_type=OutputType.ARCHIVE,
+                        content=Archive(**common_kwargs),
+                    ).model_dump_json(),
+                )
+                await auditor.emit(
+                    EventType.CP_OUTPUT_ARCHIVED,
+                    **common_kwargs,
+                    cp_name=self.cp_name,
+                    return_code=return_code,
+                    command=command,
+                )
 
     def set_src_repo(self, ref: str):
         source = self.cp.source_from_ref(ref)
@@ -191,6 +211,8 @@ class CPWorkspace(
 
             else:
                 patch = Flatfile(contents_hash=patch_sha256)
+                await patch.read(from_=StorageType.AZUREBLOB)
+                await patch.write(to=StorageType.FILESYSTEM)
                 return_code, _, _ = await run(
                     "./run.sh",
                     "-x",
@@ -211,6 +233,8 @@ class CPWorkspace(
 
     async def check_sanitizers(self, blob_sha256: str, harness: str) -> set[str]:
         blob = Flatfile(contents_hash=blob_sha256)
+        await blob.read(from_=StorageType.AZUREBLOB)
+        await blob.write(to=StorageType.FILESYSTEM)
         await LOGGER.adebug(
             "Workspace: check sanitizers on harness %s with blob (hash %s)",
             harness,

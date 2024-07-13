@@ -46,6 +46,7 @@ class CPOutputArchived(BaseModel):
     """cAPI stored the outputs of a call to ./run.sh"""
 
     filename: str
+    sha256: str
     return_code: int | None
     cp_name: str
     command: str

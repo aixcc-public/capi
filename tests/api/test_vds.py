@@ -1,14 +1,12 @@
 # pylint: disable=too-many-arguments,unused-argument
 
 import base64
-import os
 from hashlib import sha256
 from unittest import mock
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select, update
-from vyper import v
 
 from competition_api.audit.types import EventType
 from competition_api.db import VulnerabilityDiscovery, db_session
@@ -176,12 +174,6 @@ class TestVDS:
             assert submission_evt.sanitizer == body["pou"]["sanitizer"]
 
             assert submission_evt.pov_blob_sha256 == data_hash
-
-            with open(
-                os.path.join(v.get("flatfile_dir"), submission_evt.pov_blob_sha256),
-                "rb",
-            ) as f:
-                assert f.read() == data
         else:
             assert not auditor.get_events(EventType.VD_SUBMISSION)
 

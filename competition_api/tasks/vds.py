@@ -1,15 +1,15 @@
 # pylint: disable=too-many-return-statements
 
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import git
-from sqlalchemy import func, select, update
-from sqlalchemy_dlock.asyncio import create_async_sadlock
+from redis.asyncio import Redis
+from structlog.contextvars import bind_contextvars, clear_contextvars
 from structlog.stdlib import get_logger
 from vyper import v
 
-from competition_api.audit import Auditor
+from competition_api.audit import RedisAuditor, get_auditor
 from competition_api.audit.types import (
     Disposition,
     EventType,
@@ -17,42 +17,37 @@ from competition_api.audit.types import (
     VDSubmissionInvalidReason,
 )
 from competition_api.cp_workspace import BadReturnCode, CPWorkspace
-from competition_api.db import VulnerabilityDiscovery, db_session
+from competition_api.db import VulnerabilityDiscovery
 from competition_api.models.types import FeedbackStatus
 from competition_api.tasks.lib import sanitizers_triggered_at
+from competition_api.tasks.results import ResultType, report
 
 LOGGER = get_logger(__name__)
 
 
-async def check_vds(_ctx, vds: VulnerabilityDiscovery, auditor: Auditor):
+async def check_vds(
+    _,
+    audit_context: dict[str, Any],
+    log_context: dict[str, str],
+    vds: VulnerabilityDiscovery,
+    duplicate: bool,
+):
+    auditor = get_auditor(cls=RedisAuditor, **audit_context)
+    clear_contextvars()
+    bind_contextvars(**log_context)
+
     await LOGGER.ainfo("Testing VDS %s", vds)
 
-    # Make sure there is only one test going at a time for each (team id, commit hash)
-    async with db_session() as db, create_async_sadlock(
-        db, f"{vds.team_id}-{vds.pou_commit_sha1}"
-    ), CPWorkspace(vds.cp_name, auditor, str(vds.team_id)) as workspace:
-        # ARQ uses an at-least-once job execution model
-        if (
-            await db.execute(
-                select(VulnerabilityDiscovery.status).where(
-                    VulnerabilityDiscovery.id == vds.id
-                )
-            )
-        ).fetchone()[0] != FeedbackStatus.PENDING:
-            await LOGGER.awarning("VDS %s was already tested.", vds.id)
-            return
+    redis = Redis(**v.get("redis.kwargs"))
 
+    async with CPWorkspace(vds.cp_name, auditor, str(vds.team_id), redis) as workspace:
         # Validate sanitizer exists in project.yaml
         if (sanitizer_str := workspace.sanitizer(vds.pou_sanitizer)) is None:
             await auditor.emit(
                 EventType.VD_SUBMISSION_INVALID,
                 reason=VDSubmissionInvalidReason.SANITIZER_NOT_FOUND,
             )
-            await db.execute(
-                update(VulnerabilityDiscovery)
-                .where(VulnerabilityDiscovery.id == vds.id)
-                .values(status=FeedbackStatus.NOT_ACCEPTED)
-            )
+            await report(redis, ResultType.VDS, vds.id, FeedbackStatus.NOT_ACCEPTED)
             return
 
         if not workspace.cp.has(vds.pou_commit_sha1):
@@ -60,11 +55,7 @@ async def check_vds(_ctx, vds: VulnerabilityDiscovery, auditor: Auditor):
                 EventType.VD_SUBMISSION_INVALID,
                 reason=VDSubmissionInvalidReason.COMMIT_NOT_IN_REPO,
             )
-            await db.execute(
-                update(VulnerabilityDiscovery)
-                .where(VulnerabilityDiscovery.id == vds.id)
-                .values(status=FeedbackStatus.NOT_ACCEPTED)
-            )
+            await report(redis, ResultType.VDS, vds.id, FeedbackStatus.NOT_ACCEPTED)
             return
         workspace.set_src_repo(vds.pou_commit_sha1)
 
@@ -73,11 +64,7 @@ async def check_vds(_ctx, vds: VulnerabilityDiscovery, auditor: Auditor):
                 EventType.VD_SUBMISSION_INVALID,
                 reason=VDSubmissionInvalidReason.SUBMITTED_INITIAL_COMMIT,
             )
-            await db.execute(
-                update(VulnerabilityDiscovery)
-                .where(VulnerabilityDiscovery.id == vds.id)
-                .values(status=FeedbackStatus.NOT_ACCEPTED)
-            )
+            await report(redis, ResultType.VDS, vds.id, FeedbackStatus.NOT_ACCEPTED)
             return
 
         source = workspace.cp.source_from_ref(vds.pou_commit_sha1)
@@ -121,22 +108,14 @@ async def check_vds(_ctx, vds: VulnerabilityDiscovery, auditor: Auditor):
                     EventType.VD_SUBMISSION_INVALID,
                     reason=VDSubmissionInvalidReason.COMMIT_CHECKOUT_FAILED,
                 )
-                await db.execute(
-                    update(VulnerabilityDiscovery)
-                    .where(VulnerabilityDiscovery.id == vds.id)
-                    .values(status=FeedbackStatus.NOT_ACCEPTED)
-                )
+                await report(redis, ResultType.VDS, vds.id, FeedbackStatus.NOT_ACCEPTED)
                 return
             except BadReturnCode:
                 await auditor.emit(
                     EventType.VD_SUBMISSION_FAIL,
                     reasons=[VDSubmissionFailReason.RUN_POV_FAILED],
                 )
-                await db.execute(
-                    update(VulnerabilityDiscovery)
-                    .where(VulnerabilityDiscovery.id == vds.id)
-                    .values(status=FeedbackStatus.NOT_ACCEPTED)
-                )
+                await report(redis, ResultType.VDS, vds.id, FeedbackStatus.NOT_ACCEPTED)
                 return
 
             triggered = vds.pou_sanitizer in sanitizers
@@ -154,54 +133,29 @@ async def check_vds(_ctx, vds: VulnerabilityDiscovery, auditor: Auditor):
                 sanitizers_triggered=[workspace.sanitizer(san) for san in sanitizers],
             )
 
-        if v.get_bool("scoring.reject_duplicate_vds"):
-            # Check if the competitor has already submitted a working VDS for this commit
-            submissions_for_commit = (
-                await db.execute(
-                    select(
-                        func.count(  # pylint: disable=not-callable
-                            VulnerabilityDiscovery.id
-                        )
-                    ).where(
-                        VulnerabilityDiscovery.pou_commit_sha1 == vds.pou_commit_sha1,
-                        VulnerabilityDiscovery.team_id == vds.team_id,
-                        VulnerabilityDiscovery.cpv_uuid.is_not(None),
-                    )
-                )
-            ).fetchone()
-
-            if submissions_for_commit[0] > 0:
-                await auditor.emit(
-                    EventType.VD_SUBMISSION_FAIL,
-                    reasons=[VDSubmissionFailReason.DUPLICATE_COMMIT],
-                )
-                await db.execute(
-                    update(VulnerabilityDiscovery)
-                    .where(VulnerabilityDiscovery.id == vds.id)
-                    .values(status=FeedbackStatus.NOT_ACCEPTED)
-                )
-                return
+        if v.get_bool("scoring.reject_duplicate_vds") and duplicate:
+            await auditor.emit(
+                EventType.VD_SUBMISSION_FAIL,
+                reasons=[VDSubmissionFailReason.DUPLICATE_COMMIT],
+            )
+            await report(redis, ResultType.VDS, vds.id, FeedbackStatus.NOT_ACCEPTED)
+            return
 
         # TODO: "Intentional Vuln?" box is not fill-out-able
 
-        # Return results & assign CPV UUID if successful
-        results: dict[str, Any] = {
-            "status": (
-                FeedbackStatus.NOT_ACCEPTED if fail_reasons else FeedbackStatus.ACCEPTED
-            )
-        }
-
+        # Return results
+        cpv_uuid: UUID | None = None
         if fail_reasons:
             await auditor.emit(EventType.VD_SUBMISSION_FAIL, reasons=fail_reasons)
         else:
-            results["cpv_uuid"] = uuid4()
-            await LOGGER.adebug("CPV UUID assigned: %s", results["cpv_uuid"])
-            await auditor.emit(
-                EventType.VD_SUBMISSION_SUCCESS, cpv_uuid=results["cpv_uuid"]
-            )
+            cpv_uuid = uuid4()
+            await LOGGER.adebug("CPV UUID assigned: %s", cpv_uuid)
+            await auditor.emit(EventType.VD_SUBMISSION_SUCCESS, cpv_uuid=cpv_uuid)
 
-        await db.execute(
-            update(VulnerabilityDiscovery)
-            .where(VulnerabilityDiscovery.id == vds.id)
-            .values(**results)
+        await report(
+            redis,
+            ResultType.VDS,
+            vds.id,
+            FeedbackStatus.NOT_ACCEPTED if fail_reasons else FeedbackStatus.ACCEPTED,
+            cpv_uuid=cpv_uuid,
         )

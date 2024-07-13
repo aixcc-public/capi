@@ -11,6 +11,7 @@ from unittest import mock
 from uuid import uuid4
 
 import pytest
+from azure.storage.blob import BlobServiceClient
 from fastapi.testclient import TestClient
 from git import Repo
 from pytest_docker_tools import container
@@ -23,7 +24,7 @@ from competition_api.config import init_vyper
 from competition_api.db import GeneratedPatch, Token, VulnerabilityDiscovery
 from competition_api.db.common import Base
 from competition_api.db.session import db_session
-from competition_api.flatfile import Flatfile
+from competition_api.flatfile import Flatfile, StorageType
 from competition_api.main import app
 from competition_api.models.types import FeedbackStatus
 from tests.lib.auditor import RecordingAuditor
@@ -122,6 +123,13 @@ def client():
     return TestClient(app)
 
 
+azurite_container = container(  # pylint: disable=no-value-for-parameter
+    image="mcr.microsoft.com/azure-storage/azurite",
+    scope="session",
+    ports={"10000/tcp": None},
+    command=["azurite", "--blobHost", "0.0.0.0"],
+)
+
 redis_container = container(  # pylint: disable=no-value-for-parameter
     image="redis:6-alpine", scope="session", ports={"6379/tcp": None}
 )
@@ -137,10 +145,35 @@ db_container = container(  # pylint: disable=no-value-for-parameter
 
 
 @pytest.fixture(autouse=True)
+def azureblob_config(azurite_container):
+    host, port = azurite_container.get_addr("10000/tcp")
+    v.set(
+        "azure.storage_connection_string",
+        (
+            "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;"
+            "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/"
+            f"KBHBeksoGMGw==;BlobEndpoint=http://{host}:{port}/devstoreaccount1;"
+        ),
+    )
+
+    blobsvc = BlobServiceClient.from_connection_string(
+        v.get("azure.storage_connection_string")
+    )
+
+    v.set("azure.blob_container_name", "pytest")
+    blobsvc.create_container(v.get("azure.blob_container_name"))
+    init_vyper()
+    yield
+    blobsvc.delete_container(v.get("azure.blob_container_name"))
+
+
+@pytest.fixture(autouse=True)
 def redis_config(redis_container):
     host, port = redis_container.get_addr("6379/tcp")
     v.set("redis.host", host)
     v.set("redis.port", port)
+
+    init_vyper()
 
 
 @pytest.fixture(autouse=True)
@@ -219,7 +252,7 @@ async def _create_and_return(db, table, row):
 @pytest.fixture
 async def fake_vds_dict(creds, fake_cp):
     blob = Flatfile(contents=b"fake\n")
-    await blob.write()
+    await blob.write(to=StorageType.AZUREBLOB)
 
     return MappingProxyType(
         {
@@ -243,7 +276,7 @@ async def fake_vds(fake_vds_dict):
 @pytest.fixture
 async def fake_accepted_vds(fake_cp, creds):
     blob = Flatfile(contents=b"fake\n")
-    await blob.write()
+    await blob.write(to=StorageType.AZUREBLOB)
 
     row = {
         "team_id": creds[0],
@@ -262,7 +295,7 @@ async def fake_accepted_vds(fake_cp, creds):
 @pytest.fixture
 async def fake_gp_dict(fake_accepted_vds):
     patch = Flatfile(contents=build_patch().encode("utf8"))
-    await patch.write()
+    await patch.write(to=StorageType.AZUREBLOB)
     return MappingProxyType(
         {"data_sha256": patch.sha256, "cpv_uuid": fake_accepted_vds["cpv_uuid"]}
     )
@@ -277,7 +310,9 @@ async def fake_gp(fake_gp_dict):
 
 @pytest.fixture
 def auditor(creds):
-    return RecordingAuditor(creds[0])
+    aud = RecordingAuditor()
+    aud.push_context(team_id=creds[0])
+    return aud
 
 
 @pytest.fixture

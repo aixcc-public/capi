@@ -1,9 +1,9 @@
+from arq.connections import RedisSettings
 from structlog.stdlib import get_logger
 from vyper import v
 
 from competition_api.config import init_vyper
 from competition_api.tasks.gp import check_gp
-from competition_api.tasks.pool import build_redis_settings
 from competition_api.tasks.vds import check_vds
 
 LOGGER = get_logger(__name__)
@@ -23,4 +23,4 @@ class Worker:
 
     functions = [check_vds, check_gp]
 
-    redis_settings = build_redis_settings()
+    redis_settings = RedisSettings(**v.get("redis.kwargs"))

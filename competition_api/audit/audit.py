@@ -1,6 +1,6 @@
 from typing import Any
-from uuid import UUID
 
+import redis.asyncio as redis
 from aiofile import async_open
 from structlog.stdlib import get_logger
 from vyper import v
@@ -56,32 +56,58 @@ EVENTS = {
 
 
 class Auditor:
-    def __init__(self, team_id: UUID):
-        self._context: dict[str, Any] = {}
-        self._team_id = team_id
+    def __init__(self):
+        self.context: dict[str, Any] = {}
         self._outfile = v.get("audit.file")
+        self._redis: redis.Redis | None = None
+
+    async def _write_line(self, line: str):
+        async with async_open(self._outfile, "a", encoding="utf8") as auditfile:
+            await LOGGER.adebug("Audit event: %s", line)
+            await auditfile.write(f"{line}\n")
 
     async def _emit_event(self, event: Any):
-        async with async_open(self._outfile, "a", encoding="utf8") as auditfile:
-            event_str = event.model_dump_json()
-            await LOGGER.adebug("Audit event: %s", event_str)
-            await auditfile.write(f"{event_str}\n")
+        await self._write_line(event.model_dump_json())
 
     def push_context(self, **kwargs):
-        self._context = self._context | kwargs
+        self.context = self.context | kwargs
 
     def pop_context(self, key: str):
-        self._context.pop(key)
+        self.context.pop(key)
 
     async def emit(self, event_type: EventType, **kwargs):
         wrapped = EventWrapper(
-            team_id=self._team_id,
+            team_id=self.context["team_id"],
             run_id=v.get("run_id"),
             event_type=event_type,
-            event=EVENTS[event_type](**self._context, **kwargs),
+            event=EVENTS[event_type](**(self.context | kwargs)),
         )
         await self._emit_event(wrapped)
 
+    async def listen_for_worker_events(self):
+        if self._redis is None:
+            self._redis = redis.Redis(**v.get("redis.kwargs"))
+        async with self._redis.pubsub() as pubsub:
+            await LOGGER.adebug("Starting audit event processor")
+            await pubsub.subscribe(v.get("redis.channels.audit"))
+            while True:
+                message = await pubsub.get_message(ignore_subscribe_messages=True)
+                if message is not None:
+                    await LOGGER.ainfo("Received audit message via redis: %s", message)
+                    await self._write_line(message["data"].decode("utf8"))
 
-def get_auditor(*args, **kwargs):
-    return Auditor(*args, **kwargs)
+
+class RedisAuditor(Auditor):
+    def __init__(self):
+        self.redis = redis.Redis(**v.get("redis.kwargs"))
+        super().__init__()
+
+    async def _emit_event(self, event: Any):
+        event_str = event.model_dump_json()
+        await self.redis.publish(v.get("redis.channels.audit"), event_str)
+
+
+def get_auditor(cls=Auditor, **context) -> Auditor:
+    auditor = cls()
+    auditor.push_context(**context)
+    return auditor

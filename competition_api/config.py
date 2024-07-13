@@ -13,6 +13,15 @@ def generate_config():
     )
     v.set("database.url", f"postgresql+asyncpg://{url}")
     v.set("database.synchronous_url", f"postgresql+psycopg2://{url}")
+    v.set(
+        "redis.kwargs",
+        {
+            "host": v.get("redis.host"),
+            "port": v.get_int("redis.port"),
+            "password": v.get("redis.password"),
+            "ssl": v.get_bool("redis.ssl"),
+        },
+    )
 
 
 def init_vyper():
@@ -27,7 +36,14 @@ def init_vyper():
     except FileNotFoundError:
         LOGGER.warning("Config file not found")
 
-    generate_config()
-
     v.set_default("scoring.reject_duplicate_vds", True)
     v.set_default("run_id", "00000000-0000-0000-0000-000000000000")
+
+    v.set_default("redis.host", "127.0.0.1")
+    v.set_default("redis.port", 6379)
+    v.set_default("redis.ssl", False)
+
+    v.set_default("redis.channels.audit", "channel:audit")
+    v.set_default("redis.channels.results", "channel:results")
+
+    generate_config()

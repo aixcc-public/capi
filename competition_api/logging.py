@@ -53,6 +53,7 @@ def setup_logging():
     logging.basicConfig(format="%(message)s", stream=sys.stdout, level=logging.DEBUG)
 
     logging.getLogger("vyper").setLevel(logging.WARNING)
+    logging.getLogger("azure").setLevel(logging.WARNING)
 
 
 async def logging_middleware(request: Request, call_next) -> Response:

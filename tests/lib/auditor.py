@@ -15,3 +15,12 @@ class RecordingAuditor(Auditor):
 
     def get_events(self, event_type: EventType) -> list[Any]:
         return [event.event for event in self.events if event.event_type == event_type]
+
+
+def mock_get_auditor(auditor):
+    def get_auditor(cls=None, **context):  # pylint: disable=unused-argument
+        auditor.context = {}
+        auditor.push_context(**context)
+        return auditor
+
+    return get_auditor

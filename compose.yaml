@@ -27,6 +27,35 @@ services:
       - POSTGRES_PASSWORD=secret
       - POSTGRES_USER=capi
       - POSTGRES_DB=capi
+  azureblob:
+    image: mcr.microsoft.com/azure-storage/azurite
+    command: ["azurite", "--blobHost", "0.0.0.0"]
+    expose:
+      - "10000"
+    healthcheck:
+      test: nc 127.0.0.1 10000 -z
+      interval: 1s
+      retries: 30
+  createblobcontainer:
+    image: mcr.microsoft.com/azure-cli
+    command:
+      [
+        "az",
+        "storage",
+        "container",
+        "create",
+        "--account-key",
+        "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==",
+        "--account-name",
+        "devstoreaccount1",
+        "--blob-endpoint",
+        "http://azureblob:10000/devstoreaccount1",
+        "--name",
+        "resultblobs",
+      ]
+    depends_on:
+      azureblob:
+        condition: service_healthy
   capi_job_status:
     build:
       context: .
@@ -47,7 +76,6 @@ services:
     ports:
       - "8082:8080"
     volumes:
-      - "shared-tmp:/tmp"
       - "./capi_logs:/var/log/capi"
       - "./cp_root:/cp_root"
     configs:
@@ -55,11 +83,22 @@ services:
         target: /etc/capi/config.yaml
     environment:
       - WEB_CONCURRENCY=$WEB_CONCURRENCY
+      - AIXCC_AZURE_ACCOUNT_URL=http://devstoreaccount1.azureblob:10000
+      - AIXCC_AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azureblob:10000/devstoreaccount1;
+      - AIXCC_AZURE_BLOB_CONTAINER_NAME=resultblobs
+      - AIXCC_CP_ROOT=/cp_root
+      - AIXCC_DATABASE_HOST=postgres
+      - AIXCC_DATABASE_NAME=capi
+      - AIXCC_DATABASE_PASSWORD=secret
+      - AIXCC_DATABASE_PORT=5432
+      - AIXCC_DATABASE_USERNAME=capi
+      - AIXCC_REDIS_HOST=redis
     env_file:
-      - path: ./base.env
-        required: true
       - path: ./env
         required: true
+    depends_on:
+      createblobcontainer:
+        condition: service_completed_successfully
   capi_worker:
     build:
       context: .
@@ -67,19 +106,45 @@ services:
     restart: always
     volumes:
       - "shared-tmp:/tmp"
-      - "./capi_logs:/var/log/capi"
       - "./cp_root:/cp_root"
     configs:
       - source: capi
         target: /etc/capi/config.yaml
     environment:
       - MODE=worker
-      - WEB_CONCURRENCY=$WEB_CONCURRENCY
+      - AIXCC_FLATFILE_DIR=/tmp
+      - AIXCC_AZURE_ACCOUNT_URL=http://devstoreaccount1.azureblob:10000
+      - AIXCC_AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azureblob:10000/devstoreaccount1;
+      - AIXCC_AZURE_BLOB_CONTAINER_NAME=resultblobs
+      - AIXCC_CP_ROOT=/cp_root
+      - AIXCC_REDIS_HOST=redis
+      - DOCKER_HOST=tcp://dind:2375
     env_file:
-      - path: ./base.env
-        required: true
       - path: ./env
         required: true
+  capi_background:
+    build:
+      context: .
+    tty: true
+    restart: always
+    volumes:
+      - "./capi_logs:/var/log/capi"
+    configs:
+      - source: capi
+        target: /etc/capi/config.yaml
+    environment:
+      - MODE=background
+      - WEB_CONCURRENCY=$WEB_CONCURRENCY
+      - AIXCC_AZURE_ACCOUNT_URL=http://devstoreaccount1.azureblob:10000
+      - AIXCC_AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azureblob:10000/devstoreaccount1;
+      - AIXCC_AZURE_BLOB_CONTAINER_NAME=resultblobs
+      - AIXCC_CP_ROOT=/cp_root
+      - AIXCC_DATABASE_HOST=postgres
+      - AIXCC_DATABASE_NAME=capi
+      - AIXCC_DATABASE_PASSWORD=secret
+      - AIXCC_DATABASE_PORT=5432
+      - AIXCC_DATABASE_USERNAME=capi
+      - AIXCC_REDIS_HOST=redis
   loadtest:
     profiles:
       - loadtest

@@ -8,6 +8,7 @@ readme = "README.md"
 
 [tool.poetry.scripts]
 prestart = "competition_api.prestart:main"
+background = "competition_api.background:main"
 
 [build-system]
 requires = ["poetry-core"]
@@ -36,6 +37,9 @@ uvloop = "^0.19.0"
 vyper-config = "^1.2.1"
 whatthepatch = "^1.0.5"
 
+azure-storage-blob = "^12.20.0"
+azure-identity = "^1.17.1"
+types-redis = "^4.6.0.20240425"
 [tool.poetry.group.dev.dependencies]
 bandit = ">=1.7.8"
 black = ">=24.4.2"

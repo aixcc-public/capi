@@ -3,16 +3,16 @@ from uuid import UUID
 
 from arq.connections import ArqRedis
 from fastapi import HTTPException, status
-from sqlalchemy import insert, select, update
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncConnection
-from structlog.contextvars import bind_contextvars, clear_contextvars
+from structlog.contextvars import bind_contextvars, clear_contextvars, get_contextvars
 from structlog.stdlib import get_logger
 from vyper import v
 
 from competition_api.audit import get_auditor
 from competition_api.audit.types import EventType, GPSubmissionInvalidReason
 from competition_api.db import GeneratedPatch, VulnerabilityDiscovery, db_session
-from competition_api.flatfile import Flatfile
+from competition_api.flatfile import Flatfile, StorageType
 from competition_api.models import GPResponse, GPStatusResponse, GPSubmission
 from competition_api.models.types import FeedbackStatus, UUIDPathParameter
 
@@ -26,8 +26,7 @@ async def process_gp_upload(
     task_pool: ArqRedis,
 ) -> GPResponse:
     clear_contextvars()
-    auditor = get_auditor(team_id)
-
+    auditor = get_auditor(team_id=team_id)
     bind_contextvars(
         team_id=str(team_id), endpoint="GP upload", run_id=str(v.get("run_id"))
     )
@@ -44,7 +43,7 @@ async def process_gp_upload(
     row: dict[str, Any] = {}
 
     patch = Flatfile(contents=gp.data.encode("utf8"))
-    await patch.write()
+    await patch.write(to=StorageType.AZUREBLOB)
     bind_contextvars(patch_size=len(gp.data), patch_sha256=patch.sha256)
 
     row["data_sha256"] = patch.sha256
@@ -113,9 +112,26 @@ async def process_gp_upload(
         await db.execute(select(GeneratedPatch).where(GeneratedPatch.id == gp_row.id))
     ).fetchall()[0][0]
 
+    submissions_for_cpv_uuid = (
+        await db.execute(
+            select(func.count(GeneratedPatch.id)).where(  # pylint: disable=not-callable
+                GeneratedPatch.cpv_uuid
+                == gp_row.cpv_uuid,  # CPV UUIDs are globally unique
+                GeneratedPatch.id != gp_row.id,
+            )
+        )
+    ).fetchone()
+    duplicate = submissions_for_cpv_uuid is not None and submissions_for_cpv_uuid[0] > 0
+
     job_id = "{capijobs}" + f"check-gp-{gp_row.id}"
     enqueued = await task_pool.enqueue_job(
-        "check_gp", vds, gp_row, auditor, _job_id=job_id
+        "check_gp",
+        auditor.context,
+        get_contextvars(),
+        vds,
+        gp_row,
+        duplicate,
+        _job_id=job_id,
     )
     if not enqueued:
         await LOGGER.awarning("Job with ID %s was already enqueued", job_id)

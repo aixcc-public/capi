@@ -4,9 +4,10 @@ import os
 from pathlib import Path
 from typing import Iterator
 from unittest import mock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
+import redis.asyncio as redis
 from git import Repo
 from sqlalchemy import insert, select, update
 
@@ -17,13 +18,35 @@ from competition_api.audit.types import (
     VDSubmissionInvalidReason,
 )
 from competition_api.db import GeneratedPatch, VulnerabilityDiscovery, db_session
-from competition_api.flatfile import Flatfile
+from competition_api.flatfile import Flatfile, StorageType
 from competition_api.models.types import FeedbackStatus
 from competition_api.tasks.gp import check_gp
+from competition_api.tasks.results import ResultType
 from competition_api.tasks.vds import check_vds
 from tests.lib.patch import build_patch
 
-from .lib.auditor import RecordingAuditor
+from .lib.auditor import mock_get_auditor
+
+
+def build_mock_report(
+    exp_result_type: ResultType, exp_row_id: UUID, exp_feedback_status: FeedbackStatus
+):
+    async def report(
+        redis_: redis.Redis,
+        result_type: ResultType,
+        row_id: UUID,
+        feedback_status: FeedbackStatus,
+        cpv_uuid: UUID | None = None,
+    ):
+        assert redis_
+        assert result_type == exp_result_type
+        assert row_id == exp_row_id
+        assert feedback_status == exp_feedback_status
+
+        if result_type == ResultType.VDS and feedback_status == FeedbackStatus.ACCEPTED:
+            assert cpv_uuid
+
+    return report
 
 
 def build_mock_run(
@@ -262,6 +285,7 @@ class TestTestVDS:
         sanitizer_fires,
         source,
         raises_timeout,
+        auditor,
     ):
         fail_test = expected_event_type == EventType.VD_SUBMISSION_FAIL
         invalid_test = expected_event_type == EventType.VD_SUBMISSION_INVALID
@@ -289,12 +313,11 @@ class TestTestVDS:
                 )
             ).fetchone()[0]
 
-        auditor = RecordingAuditor(creds[0])
-        auditor.push_context(vd_uuid=fake_vds["id"], cp_name=fake_vds["cp_name"])
-
         san = test_project_yaml["sanitizers"][fake_vds["pou_sanitizer"]]
 
-        pov_data = await Flatfile(contents_hash=fake_vds["pov_data_sha256"]).read()
+        pov_data = await Flatfile(contents_hash=fake_vds["pov_data_sha256"]).read(
+            from_=StorageType.AZUREBLOB
+        )
 
         with mock.patch(
             "competition_api.cp_workspace.run",
@@ -314,8 +337,31 @@ class TestTestVDS:
             ),
         ), mock.patch(
             "competition_api.cp_workspace.CPWorkspace.checkout"
-        ) as mock_checkout:
-            await check_vds(None, vds, auditor)
+        ) as mock_checkout, mock.patch(
+            "competition_api.tasks.vds.get_auditor", mock_get_auditor(auditor)
+        ), mock.patch(
+            "competition_api.tasks.vds.report",
+            build_mock_report(
+                ResultType.VDS,
+                vds.id,
+                (
+                    FeedbackStatus.ACCEPTED
+                    if not fail_test and not invalid_test
+                    else FeedbackStatus.NOT_ACCEPTED
+                ),
+            ),
+        ):
+            await check_vds(
+                None,
+                {
+                    "team_id": creds[0],
+                    "vd_uuid": fake_vds["id"],
+                    "cp_name": fake_vds["cp_name"],
+                },
+                {},
+                vds,
+                False,
+            )
             if (
                 not invalid_test
                 and fail_reason != [VDSubmissionFailReason.RUN_POV_FAILED]
@@ -349,22 +395,6 @@ class TestTestVDS:
         for fires, result in zip(sanitizer_fires, sanitizer_results):
             assert result.expected_sanitizer_triggered == fires
 
-        async with db_session() as db:
-            vds = (
-                await db.execute(
-                    select(VulnerabilityDiscovery).where(
-                        VulnerabilityDiscovery.id == fake_vds["id"]
-                    )
-                )
-            ).fetchone()[0]
-
-            if not fail_test and not invalid_test:
-                assert vds.status == FeedbackStatus.ACCEPTED
-                assert vds.cpv_uuid
-            else:
-                assert vds.status == FeedbackStatus.NOT_ACCEPTED
-                assert vds.cpv_uuid is None
-
     @staticmethod
     @pytest.mark.parametrize(
         "existing_success,source",
@@ -386,6 +416,7 @@ class TestTestVDS:
         repo,
         existing_success,
         source,
+        auditor,
     ):
         src_repo = Repo(Path(repo.working_dir) / "src" / source)
         async with db_session() as db:
@@ -407,12 +438,11 @@ class TestTestVDS:
                 )
             ).fetchone()[0]
 
-        auditor = RecordingAuditor(creds[0])
-        auditor.push_context(vd_uuid=fake_vds["id"], cp_name=fake_vds["cp_name"])
-
         san = test_project_yaml["sanitizers"][fake_vds["pou_sanitizer"]]
 
-        pov_data = await Flatfile(contents_hash=fake_vds["pov_data_sha256"]).read()
+        pov_data = await Flatfile(contents_hash=fake_vds["pov_data_sha256"]).read(
+            from_=StorageType.AZUREBLOB
+        )
 
         with mock.patch(
             "competition_api.cp_workspace.run",
@@ -423,8 +453,31 @@ class TestTestVDS:
                 sanitizer=(san for san in [san, san, ""]),
                 container_name=test_project_yaml["docker_image"],
             ),
+        ), mock.patch(
+            "competition_api.tasks.vds.get_auditor", mock_get_auditor(auditor)
+        ), mock.patch(
+            "competition_api.tasks.vds.report",
+            build_mock_report(
+                ResultType.VDS,
+                vds.id,
+                (
+                    FeedbackStatus.NOT_ACCEPTED
+                    if existing_success
+                    else FeedbackStatus.ACCEPTED
+                ),
+            ),
         ):
-            await check_vds(None, vds, auditor)
+            await check_vds(
+                None,
+                {
+                    "team_id": creds[0],
+                    "vd_uuid": fake_vds["id"],
+                    "cp_name": fake_vds["cp_name"],
+                },
+                {},
+                vds,
+                existing_success,
+            )
 
         event = auditor.get_events(EventType.VD_SUBMISSION_FAIL)
 
@@ -433,18 +486,6 @@ class TestTestVDS:
             event = event[0]
 
             assert event.reasons == [VDSubmissionFailReason.DUPLICATE_COMMIT]
-
-            async with db_session() as db:
-                vds = (
-                    await db.execute(
-                        select(VulnerabilityDiscovery).where(
-                            VulnerabilityDiscovery.id == fake_vds["id"]
-                        )
-                    )
-                ).fetchone()[0]
-
-                assert vds.status == FeedbackStatus.NOT_ACCEPTED
-                assert vds.cpv_uuid is None
         else:
             assert not event
 
@@ -494,6 +535,7 @@ class TestTestGP:
         test_project_yaml,
         creds,
         raises_timeout,
+        auditor,
     ):
         src_repo = Repo(Path(repo.working_dir) / "src" / source)
         async with db_session() as db:
@@ -518,14 +560,6 @@ class TestTestGP:
                 )
             ).fetchone()[0]
 
-        auditor = RecordingAuditor(creds[0])
-        auditor.push_context(
-            vd_uuid=fake_accepted_vds["id"],
-            cp_name=fake_accepted_vds["cp_name"],
-            gp_uuid=fake_gp["id"],
-            cpv_uuid=fake_accepted_vds["cpv_uuid"],
-        )
-
         san = (
             ""
             if sanitizer_does_not_fire
@@ -534,8 +568,10 @@ class TestTestGP:
 
         pov_data = await Flatfile(
             contents_hash=fake_accepted_vds["pov_data_sha256"]
-        ).read()
-        patch = await Flatfile(contents_hash=fake_gp["data_sha256"]).read()
+        ).read(from_=StorageType.AZUREBLOB)
+        patch = await Flatfile(contents_hash=fake_gp["data_sha256"]).read(
+            from_=StorageType.AZUREBLOB
+        )
 
         with mock.patch(
             "competition_api.cp_workspace.run",
@@ -553,8 +589,34 @@ class TestTestGP:
                 container_name=test_project_yaml["docker_image"],
                 raises_timeout=raises_timeout,
             ),
+        ), mock.patch(
+            "competition_api.tasks.gp.get_auditor", mock_get_auditor(auditor)
+        ), mock.patch(
+            "competition_api.tasks.gp.report",
+            build_mock_report(
+                ResultType.GP,
+                gp.id,
+                (
+                    FeedbackStatus.NOT_ACCEPTED
+                    if not patch_builds
+                    else FeedbackStatus.ACCEPTED
+                ),
+            ),
         ):
-            await check_gp(None, vds, gp, auditor)
+            await check_gp(
+                None,
+                {
+                    "team_id": creds[0],
+                    "vd_uuid": fake_accepted_vds["id"],
+                    "cp_name": fake_accepted_vds["cp_name"],
+                    "gp_uuid": fake_gp["id"],
+                    "cpv_uuid": fake_accepted_vds["cpv_uuid"],
+                },
+                {},
+                vds,
+                gp,
+                False,
+            )
 
         if patch_builds:
             assert auditor.get_events(EventType.GP_PATCH_BUILT)
@@ -598,18 +660,6 @@ class TestTestGP:
 
         assert auditor.get_events(EventType.GP_SUBMISSION_SUCCESS)
 
-        async with db_session() as db:
-            gp = (
-                await db.execute(
-                    select(GeneratedPatch).where(GeneratedPatch.id == fake_gp["id"])
-                )
-            ).fetchone()[0]
-
-            if all([patch_builds, functional_tests_pass, sanitizer_does_not_fire]):
-                assert gp.status == FeedbackStatus.ACCEPTED
-            else:
-                assert gp.status == FeedbackStatus.NOT_ACCEPTED
-
     @staticmethod
     @pytest.mark.parametrize(
         "source", ["primary", "secondary/nested-folder", "tertiary"]
@@ -623,6 +673,7 @@ class TestTestGP:
         test_project_yaml,
         creds,
         source,
+        auditor,
     ):
         patch_sha256 = fake_gp["data_sha256"]
         src_repo = Repo(Path(repo.working_dir) / "src" / source)
@@ -649,20 +700,14 @@ class TestTestGP:
                 )
             ).fetchone()[0]
 
-        auditor = RecordingAuditor(creds[0])
-        auditor.push_context(
-            vd_uuid=fake_accepted_vds["id"],
-            cp_name=fake_accepted_vds["cp_name"],
-            gp_uuid=fake_gp["id"],
-            cpv_uuid=fake_accepted_vds["cpv_uuid"],
-        )
-
         san = test_project_yaml["sanitizers"][fake_accepted_vds["pou_sanitizer"]]
 
         pov_data = await Flatfile(
             contents_hash=fake_accepted_vds["pov_data_sha256"]
-        ).read()
-        patch = await Flatfile(contents_hash=patch_sha256).read()
+        ).read(from_=StorageType.AZUREBLOB)
+        patch = await Flatfile(contents_hash=patch_sha256).read(
+            from_=StorageType.AZUREBLOB
+        )
 
         with mock.patch(
             "competition_api.cp_workspace.run",
@@ -678,21 +723,34 @@ class TestTestGP:
                 tests_returncode=0,
                 container_name=test_project_yaml["docker_image"],
             ),
+        ), mock.patch(
+            "competition_api.tasks.gp.get_auditor", mock_get_auditor(auditor)
+        ), mock.patch(
+            "competition_api.tasks.gp.report",
+            build_mock_report(
+                ResultType.GP,
+                gp.id,
+                # We don't tell the user about this type of failure
+                FeedbackStatus.ACCEPTED,
+            ),
         ):
-            await check_gp(None, vds, gp, auditor)
+            await check_gp(
+                None,
+                {
+                    "team_id": creds[0],
+                    "vd_uuid": fake_accepted_vds["id"],
+                    "cp_name": fake_accepted_vds["cp_name"],
+                    "gp_uuid": fake_gp["id"],
+                    "cpv_uuid": fake_accepted_vds["cpv_uuid"],
+                },
+                {},
+                vds,
+                gp,
+                True,
+            )
 
         dupe = auditor.get_events(EventType.DUPLICATE_GP_SUBMISSION_FOR_CPV_UUID)
         assert dupe
-
-        async with db_session() as db:
-            gp = (
-                await db.execute(
-                    select(GeneratedPatch).where(GeneratedPatch.id == fake_gp["id"])
-                )
-            ).fetchone()[0]
-
-            # We don't tell the user about this type of failure
-            assert gp.status == FeedbackStatus.ACCEPTED
 
     @staticmethod
     @pytest.mark.parametrize(
@@ -727,6 +785,7 @@ class TestTestGP:
         fail_reason,
         patch_filename,
         source,
+        auditor,
     ):
         patch_sha256 = fake_gp["data_sha256"]
         src_repo = Repo(Path(repo.working_dir) / "src" / source)
@@ -748,7 +807,7 @@ class TestTestGP:
                     else "this\nis\nnot a patch\nfile"
                 )
                 blob = Flatfile(contents=patch_content.encode("utf8"))
-                await blob.write()
+                await blob.write(to=StorageType.AZUREBLOB)
                 await db.execute(update(GeneratedPatch).values(data_sha256=blob.sha256))
                 patch_sha256 = blob.sha256
 
@@ -766,20 +825,14 @@ class TestTestGP:
                 )
             ).fetchone()[0]
 
-        auditor = RecordingAuditor(creds[0])
-        auditor.push_context(
-            vd_uuid=fake_accepted_vds["id"],
-            cp_name=fake_accepted_vds["cp_name"],
-            gp_uuid=fake_gp["id"],
-            cpv_uuid=fake_accepted_vds["cpv_uuid"],
-        )
-
         san = test_project_yaml["sanitizers"][fake_accepted_vds["pou_sanitizer"]]
 
         pov_data = await Flatfile(
             contents_hash=fake_accepted_vds["pov_data_sha256"]
-        ).read()
-        patch = await Flatfile(contents_hash=patch_sha256).read()
+        ).read(from_=StorageType.AZUREBLOB)
+        patch = await Flatfile(contents_hash=patch_sha256).read(
+            from_=StorageType.AZUREBLOB
+        )
 
         with mock.patch(
             "competition_api.cp_workspace.run",
@@ -795,18 +848,31 @@ class TestTestGP:
                 tests_returncode=0,
                 container_name=test_project_yaml["docker_image"],
             ),
+        ), mock.patch(
+            "competition_api.tasks.gp.get_auditor", mock_get_auditor(auditor)
+        ), mock.patch(
+            "competition_api.tasks.gp.report",
+            build_mock_report(
+                ResultType.GP,
+                gp.id,
+                FeedbackStatus.NOT_ACCEPTED,
+            ),
         ):
-            await check_gp(None, vds, gp, auditor)
+            await check_gp(
+                None,
+                {
+                    "team_id": creds[0],
+                    "vd_uuid": fake_accepted_vds["id"],
+                    "cp_name": fake_accepted_vds["cp_name"],
+                    "gp_uuid": fake_gp["id"],
+                    "cpv_uuid": fake_accepted_vds["cpv_uuid"],
+                },
+                {},
+                vds,
+                gp,
+                False,
+            )
 
         fail = auditor.get_events(EventType.GP_SUBMISSION_FAIL)
         assert fail
         assert fail[0].reason == fail_reason
-
-        async with db_session() as db:
-            gp = (
-                await db.execute(
-                    select(GeneratedPatch).where(GeneratedPatch.id == fake_gp["id"])
-                )
-            ).fetchone()[0]
-
-            assert gp.status == FeedbackStatus.NOT_ACCEPTED

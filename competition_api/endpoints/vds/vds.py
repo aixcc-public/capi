@@ -2,9 +2,9 @@ import uuid
 
 from arq.connections import ArqRedis
 from fastapi import HTTPException, status
-from sqlalchemy import insert, select
+from sqlalchemy import func, insert, select
 from sqlalchemy.ext.asyncio import AsyncConnection
-from structlog.contextvars import bind_contextvars, clear_contextvars
+from structlog.contextvars import bind_contextvars, clear_contextvars, get_contextvars
 from structlog.stdlib import get_logger
 from vyper import v
 
@@ -12,7 +12,7 @@ from competition_api.audit import get_auditor
 from competition_api.audit.types import EventType, VDSubmissionInvalidReason
 from competition_api.cp_registry import CPRegistry
 from competition_api.db import VulnerabilityDiscovery
-from competition_api.flatfile import Flatfile
+from competition_api.flatfile import Flatfile, StorageType
 from competition_api.models.types import FeedbackStatus, UUIDPathParameter
 from competition_api.models.vds import VDSResponse, VDSStatusResponse, VDSubmission
 
@@ -26,7 +26,7 @@ async def process_vd_upload(
     task_pool: ArqRedis,
 ) -> VDSResponse:
     clear_contextvars()
-    auditor = get_auditor(team_id)
+    auditor = get_auditor(team_id=team_id)
 
     bind_contextvars(
         team_id=str(team_id),
@@ -45,7 +45,7 @@ async def process_vd_upload(
         )
 
     blob = Flatfile(contents=vds.pov.data)
-    await blob.write()
+    await blob.write(to=StorageType.AZUREBLOB)
     bind_contextvars(vds_blob_size=len(vds.pov.data), vds_blob_sha256=blob.sha256)
 
     row = {
@@ -94,8 +94,29 @@ async def process_vd_upload(
         sanitizer=db_row.pou_sanitizer,
     )
 
+    # Check if the competitor has already submitted a working VDS for this commit
+    submissions_for_commit = (
+        await db.execute(
+            select(
+                func.count(VulnerabilityDiscovery.id)  # pylint: disable=not-callable
+            ).where(
+                VulnerabilityDiscovery.pou_commit_sha1 == db_row.pou_commit_sha1,
+                VulnerabilityDiscovery.team_id == db_row.team_id,
+                VulnerabilityDiscovery.cpv_uuid.is_not(None),
+            )
+        )
+    ).fetchone()
+    duplicate = submissions_for_commit is not None and submissions_for_commit[0] > 0
+
     job_id = "{capijobs}" + f"check-vds-{db_row.id}"
-    enqueued = await task_pool.enqueue_job("check_vds", db_row, auditor, _job_id=job_id)
+    enqueued = await task_pool.enqueue_job(
+        "check_vds",
+        auditor.context,
+        get_contextvars(),
+        db_row,
+        duplicate,
+        _job_id=job_id,
+    )
     if not enqueued:
         await LOGGER.awarning("Job with ID %s was already enqueued", job_id)
 

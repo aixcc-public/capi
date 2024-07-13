@@ -1,56 +1,44 @@
 # pylint: disable=too-many-return-statements
-
 import os
+from typing import Any
 
 import whatthepatch
-from sqlalchemy import func, select, update
-from sqlalchemy_dlock.asyncio import create_async_sadlock
+from redis.asyncio import Redis
+from structlog.contextvars import bind_contextvars, clear_contextvars
 from structlog.stdlib import get_logger
+from vyper import v
 
-from competition_api.audit import Auditor
+from competition_api.audit import RedisAuditor, get_auditor
 from competition_api.audit.types import EventType, GPSubmissionFailReason
 from competition_api.cp_workspace import BadReturnCode, CPWorkspace
-from competition_api.db import GeneratedPatch, VulnerabilityDiscovery, db_session
-from competition_api.flatfile import Flatfile
+from competition_api.db import GeneratedPatch, VulnerabilityDiscovery
+from competition_api.flatfile import Flatfile, StorageType
 from competition_api.lib import peek
 from competition_api.models.types import FeedbackStatus
 from competition_api.tasks.lib import sanitizers_triggered_at
+from competition_api.tasks.results import ResultType, report
 
 LOGGER = get_logger(__name__)
 
 
 async def check_gp(
-    _ctx, vds: VulnerabilityDiscovery, gp: GeneratedPatch, auditor: Auditor
+    _,
+    audit_context: dict[str, Any],
+    log_context: dict[str, str],
+    vds: VulnerabilityDiscovery,
+    gp: GeneratedPatch,
+    duplicate: bool,
 ):
+    auditor = get_auditor(cls=RedisAuditor, **audit_context)
+    clear_contextvars()
+    bind_contextvars(**log_context)
+
     await LOGGER.ainfo("Testing GP %s", gp)
 
-    # Make sure there is only one test going at a time for each (team id, cpv_uuid)
-    async with db_session() as db, create_async_sadlock(
-        db, f"{vds.team_id}-{vds.cpv_uuid}"
-    ), CPWorkspace(vds.cp_name, auditor, str(vds.team_id)) as workspace:
-        # ARQ uses an at-least-once job execution model
-        if (
-            await db.execute(
-                select(GeneratedPatch.status).where(GeneratedPatch.id == gp.id)
-            )
-        ).fetchone()[0] != FeedbackStatus.PENDING:
-            await LOGGER.awarning("GP %s was already tested.", gp.id)
-            return
+    redis = Redis(**v.get("redis.kwargs"))
 
-        # Check for duplicate
-        submissions_for_cpv_uuid = (
-            await db.execute(
-                select(
-                    func.count(GeneratedPatch.id)  # pylint: disable=not-callable
-                ).where(
-                    GeneratedPatch.cpv_uuid
-                    == gp.cpv_uuid,  # CPV UUIDs are globally unique
-                    GeneratedPatch.id != gp.id,
-                )
-            )
-        ).fetchone()
-
-        if submissions_for_cpv_uuid[0] > 0:
+    async with CPWorkspace(vds.cp_name, auditor, str(vds.team_id), redis) as workspace:
+        if duplicate:
             await auditor.emit(
                 EventType.DUPLICATE_GP_SUBMISSION_FOR_CPV_UUID,
             )
@@ -58,7 +46,7 @@ async def check_gp(
         # Verify patch only modifies allowed extensions
         patchfile = Flatfile(contents_hash=gp.data_sha256)
         try:
-            content = await patchfile.read()
+            content = await patchfile.read(from_=StorageType.AZUREBLOB)
             if content is None:
                 raise ValueError("Patch file was empty")
 
@@ -72,12 +60,7 @@ async def check_gp(
                 EventType.GP_SUBMISSION_FAIL,
                 reason=GPSubmissionFailReason.MALFORMED_PATCH_FILE,
             )
-            async with db_session() as db:
-                await db.execute(
-                    update(GeneratedPatch)
-                    .where(GeneratedPatch.id == gp.id)
-                    .values(status=FeedbackStatus.NOT_ACCEPTED)
-                )
+            await report(redis, ResultType.GP, gp.id, FeedbackStatus.NOT_ACCEPTED)
             return
 
         for diff in diffs:
@@ -90,12 +73,7 @@ async def check_gp(
                     EventType.GP_SUBMISSION_FAIL,
                     reason=GPSubmissionFailReason.PATCHED_DISALLOWED_FILE_EXTENSION,
                 )
-                async with db_session() as db:
-                    await db.execute(
-                        update(GeneratedPatch)
-                        .where(GeneratedPatch.id == gp.id)
-                        .values(status=FeedbackStatus.NOT_ACCEPTED)
-                    )
+                await report(redis, ResultType.GP, gp.id, FeedbackStatus.NOT_ACCEPTED)
                 return
 
         # Build with patch
@@ -127,23 +105,13 @@ async def check_gp(
                 EventType.GP_SUBMISSION_FAIL,
                 reason=GPSubmissionFailReason.PATCH_FAILED_APPLY_OR_BUILD,
             )
-            async with db_session() as db:
-                await db.execute(
-                    update(GeneratedPatch)
-                    .where(GeneratedPatch.id == gp.id)
-                    .values(status=FeedbackStatus.NOT_ACCEPTED)
-                )
+            await report(redis, ResultType.GP, gp.id, FeedbackStatus.NOT_ACCEPTED)
             return
 
         await auditor.emit(EventType.GP_PATCH_BUILT)
 
         # The rest of the failures are silent
-        async with db_session() as db:
-            await db.execute(
-                update(GeneratedPatch)
-                .where(GeneratedPatch.id == gp.id)
-                .values(status=FeedbackStatus.ACCEPTED)
-            )
+        await report(redis, ResultType.GP, gp.id, FeedbackStatus.ACCEPTED)
 
         # Run functional tests
         result = await workspace.run_functional_tests()
