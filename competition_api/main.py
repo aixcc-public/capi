@@ -5,7 +5,6 @@ from fastapi import FastAPI
 from structlog.stdlib import get_logger
 from vyper import v
 
-from competition_api.audit import get_auditor
 from competition_api.config import init_vyper
 from competition_api.cp_registry import CPRegistry
 from competition_api.endpoints import (
@@ -16,7 +15,6 @@ from competition_api.endpoints import (
     VDSRouter,
 )
 from competition_api.logging import logging_middleware, setup_logging
-from competition_api.tasks.results import ResultReceiver
 
 LOGGER = get_logger()
 
@@ -44,9 +42,6 @@ async def lifespan(_app: FastAPI):
         CPRegistry.instance()
 
     await LOGGER.ainfo("Starting up with workers %s", v.get("workers"))
-
-    get_auditor().listen_for_worker_events()
-    ResultReceiver().listen_for_worker_events()
 
     yield
 
