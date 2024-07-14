@@ -112,6 +112,7 @@ services:
         target: /etc/capi/config.yaml
     environment:
       - MODE=worker
+      - AIXCC_WORKER_ID=00000000-0000-0000-0000-000000000000
       - AIXCC_FLATFILE_DIR=/tmp
       - AIXCC_AZURE_ACCOUNT_URL=http://devstoreaccount1.azureblob:10000
       - AIXCC_AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azureblob:10000/devstoreaccount1;

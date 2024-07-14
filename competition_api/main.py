@@ -43,6 +43,8 @@ async def lifespan(_app: FastAPI):
         # initialize cp registry
         CPRegistry.instance()
 
+    await LOGGER.ainfo("Starting up with workers %s", v.get("workers"))
+
     get_auditor().listen_for_worker_events()
     ResultReceiver().listen_for_worker_events()
 

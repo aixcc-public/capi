@@ -126,6 +126,12 @@ async def process_gp_upload(
 
     # pylint: disable=duplicate-code
     job_id = "{capijobs}" + f"check-gp-{gp_row.id}"
+    queue_name = get_queue_name(
+        str(team_id) if str(team_id) in v.get("workers") else "default"
+    )
+    if queue_name == "default":
+        await LOGGER.awarning("Putting job for %s on the default queue", str(team_id))
+    await LOGGER.ainfo("Queuing %s on %s", job_id, queue_name)
     enqueued = await task_pool.enqueue_job(
         "check_gp",
         auditor.context,
@@ -134,9 +140,7 @@ async def process_gp_upload(
         gp_row,
         duplicate,
         _job_id=job_id,
-        _queue_name=get_queue_name(
-            str(team_id) if str(team_id) in v.get("workers") else "default"
-        ),
+        _queue_name=queue_name,
     )
     if not enqueued:
         await LOGGER.awarning("Job with ID %s was already enqueued", job_id)
