@@ -45,5 +45,6 @@ def init_vyper():
 
     v.set_default("redis.channels.audit", "channel:audit")
     v.set_default("redis.channels.results", "channel:results")
+    v.set_default("workers", [])
 
     generate_config()

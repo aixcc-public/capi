@@ -15,6 +15,7 @@ from competition_api.db import GeneratedPatch, VulnerabilityDiscovery, db_sessio
 from competition_api.flatfile import Flatfile, StorageType
 from competition_api.models import GPResponse, GPStatusResponse, GPSubmission
 from competition_api.models.types import FeedbackStatus, UUIDPathParameter
+from competition_api.tasks.pool import get_queue_name
 
 LOGGER = get_logger(__name__)
 
@@ -123,6 +124,7 @@ async def process_gp_upload(
     ).fetchone()
     duplicate = submissions_for_cpv_uuid is not None and submissions_for_cpv_uuid[0] > 0
 
+    # pylint: disable=duplicate-code
     job_id = "{capijobs}" + f"check-gp-{gp_row.id}"
     enqueued = await task_pool.enqueue_job(
         "check_gp",
@@ -132,9 +134,13 @@ async def process_gp_upload(
         gp_row,
         duplicate,
         _job_id=job_id,
+        _queue_name=get_queue_name(
+            str(team_id) if str(team_id) in v.get("workers") else "default"
+        ),
     )
     if not enqueued:
         await LOGGER.awarning("Job with ID %s was already enqueued", job_id)
+    # pylint: enable=duplicate-code
 
     return GPResponse(
         status=gp_row.status,

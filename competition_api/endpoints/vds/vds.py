@@ -15,6 +15,7 @@ from competition_api.db import VulnerabilityDiscovery
 from competition_api.flatfile import Flatfile, StorageType
 from competition_api.models.types import FeedbackStatus, UUIDPathParameter
 from competition_api.models.vds import VDSResponse, VDSStatusResponse, VDSubmission
+from competition_api.tasks.pool import get_queue_name
 
 LOGGER = get_logger(__name__)
 
@@ -108,6 +109,7 @@ async def process_vd_upload(
     ).fetchone()
     duplicate = submissions_for_commit is not None and submissions_for_commit[0] > 0
 
+    # pylint: disable=duplicate-code
     job_id = "{capijobs}" + f"check-vds-{db_row.id}"
     enqueued = await task_pool.enqueue_job(
         "check_vds",
@@ -116,9 +118,13 @@ async def process_vd_upload(
         db_row,
         duplicate,
         _job_id=job_id,
+        _queue_name=get_queue_name(
+            str(team_id) if str(team_id) in v.get("workers") else "default"
+        ),
     )
     if not enqueued:
         await LOGGER.awarning("Job with ID %s was already enqueued", job_id)
+    # pylint: enable=duplicate-code
 
     return VDSResponse(
         status=db_row.status,
