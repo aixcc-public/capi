@@ -46,6 +46,7 @@ async def process_vd_upload(
         )
 
     blob = Flatfile(contents=vds.pov.data)
+    await blob.write(to=StorageType.FILESYSTEM)  # for archival purposes
     await blob.write(to=StorageType.AZUREBLOB)
     bind_contextvars(vds_blob_size=len(vds.pov.data), vds_blob_sha256=blob.sha256)
 

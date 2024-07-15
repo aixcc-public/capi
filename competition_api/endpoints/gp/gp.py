@@ -44,6 +44,7 @@ async def process_gp_upload(
     row: dict[str, Any] = {}
 
     patch = Flatfile(contents=gp.data.encode("utf8"))
+    await patch.write(to=StorageType.FILESYSTEM)  # for archival purposes
     await patch.write(to=StorageType.AZUREBLOB)
     bind_contextvars(patch_size=len(gp.data), patch_sha256=patch.sha256)
 
