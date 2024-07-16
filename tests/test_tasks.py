@@ -1,4 +1,4 @@
-# pylint: disable=too-many-arguments,too-many-locals,too-many-return-statements,unused-argument
+# pylint: disable=unused-argument
 # mypy: disable-error-code=attr-defined
 import os
 from pathlib import Path
@@ -286,6 +286,8 @@ class TestTestVDS:
         source,
         raises_timeout,
         auditor,
+        container_name,
+        container_sas,
     ):
         fail_test = expected_event_type == EventType.VD_SUBMISSION_FAIL
         invalid_test = expected_event_type == EventType.VD_SUBMISSION_INVALID
@@ -315,9 +317,9 @@ class TestTestVDS:
 
         san = test_project_yaml["sanitizers"][fake_vds["pou_sanitizer"]]
 
-        pov_data = await Flatfile(contents_hash=fake_vds["pov_data_sha256"]).read(
-            from_=StorageType.AZUREBLOB
-        )
+        pov_data = await Flatfile(
+            container_name, contents_hash=fake_vds["pov_data_sha256"]
+        ).read(from_=StorageType.AZUREBLOB)
 
         with mock.patch(
             "competition_api.cp_workspace.run",
@@ -361,6 +363,8 @@ class TestTestVDS:
                 {},
                 vds,
                 False,
+                container_name,
+                container_sas,
             )
             if (
                 not invalid_test
@@ -417,6 +421,8 @@ class TestTestVDS:
         existing_success,
         source,
         auditor,
+        container_name,
+        container_sas,
     ):
         src_repo = Repo(Path(repo.working_dir) / "src" / source)
         async with db_session() as db:
@@ -440,9 +446,9 @@ class TestTestVDS:
 
         san = test_project_yaml["sanitizers"][fake_vds["pou_sanitizer"]]
 
-        pov_data = await Flatfile(contents_hash=fake_vds["pov_data_sha256"]).read(
-            from_=StorageType.AZUREBLOB
-        )
+        pov_data = await Flatfile(
+            container_name, contents_hash=fake_vds["pov_data_sha256"]
+        ).read(from_=StorageType.AZUREBLOB)
 
         with mock.patch(
             "competition_api.cp_workspace.run",
@@ -477,6 +483,8 @@ class TestTestVDS:
                 {},
                 vds,
                 existing_success,
+                container_name,
+                container_sas,
             )
 
         event = auditor.get_events(EventType.VD_SUBMISSION_FAIL)
@@ -536,6 +544,8 @@ class TestTestGP:
         creds,
         raises_timeout,
         auditor,
+        container_name,
+        container_sas,
     ):
         src_repo = Repo(Path(repo.working_dir) / "src" / source)
         async with db_session() as db:
@@ -567,11 +577,11 @@ class TestTestGP:
         )
 
         pov_data = await Flatfile(
-            contents_hash=fake_accepted_vds["pov_data_sha256"]
+            container_name, contents_hash=fake_accepted_vds["pov_data_sha256"]
         ).read(from_=StorageType.AZUREBLOB)
-        patch = await Flatfile(contents_hash=fake_gp["data_sha256"]).read(
-            from_=StorageType.AZUREBLOB
-        )
+        patch = await Flatfile(
+            container_name, contents_hash=fake_gp["data_sha256"]
+        ).read(from_=StorageType.AZUREBLOB)
 
         with mock.patch(
             "competition_api.cp_workspace.run",
@@ -616,6 +626,8 @@ class TestTestGP:
                 vds,
                 gp,
                 False,
+                container_name,
+                container_sas,
             )
 
         if patch_builds:
@@ -674,6 +686,8 @@ class TestTestGP:
         creds,
         source,
         auditor,
+        container_name,
+        container_sas,
     ):
         patch_sha256 = fake_gp["data_sha256"]
         src_repo = Repo(Path(repo.working_dir) / "src" / source)
@@ -703,9 +717,9 @@ class TestTestGP:
         san = test_project_yaml["sanitizers"][fake_accepted_vds["pou_sanitizer"]]
 
         pov_data = await Flatfile(
-            contents_hash=fake_accepted_vds["pov_data_sha256"]
+            container_name, contents_hash=fake_accepted_vds["pov_data_sha256"]
         ).read(from_=StorageType.AZUREBLOB)
-        patch = await Flatfile(contents_hash=patch_sha256).read(
+        patch = await Flatfile(container_name, contents_hash=patch_sha256).read(
             from_=StorageType.AZUREBLOB
         )
 
@@ -747,6 +761,8 @@ class TestTestGP:
                 vds,
                 gp,
                 True,
+                container_name,
+                container_sas,
             )
 
         dupe = auditor.get_events(EventType.DUPLICATE_GP_SUBMISSION_FOR_CPV_UUID)
@@ -786,6 +802,8 @@ class TestTestGP:
         patch_filename,
         source,
         auditor,
+        container_name,
+        container_sas,
     ):
         patch_sha256 = fake_gp["data_sha256"]
         src_repo = Repo(Path(repo.working_dir) / "src" / source)
@@ -806,7 +824,7 @@ class TestTestGP:
                     == GPSubmissionFailReason.PATCHED_DISALLOWED_FILE_EXTENSION
                     else "this\nis\nnot a patch\nfile"
                 )
-                blob = Flatfile(contents=patch_content.encode("utf8"))
+                blob = Flatfile(container_name, contents=patch_content.encode("utf8"))
                 await blob.write(to=StorageType.AZUREBLOB)
                 await db.execute(update(GeneratedPatch).values(data_sha256=blob.sha256))
                 patch_sha256 = blob.sha256
@@ -828,9 +846,9 @@ class TestTestGP:
         san = test_project_yaml["sanitizers"][fake_accepted_vds["pou_sanitizer"]]
 
         pov_data = await Flatfile(
-            contents_hash=fake_accepted_vds["pov_data_sha256"]
+            container_name, contents_hash=fake_accepted_vds["pov_data_sha256"]
         ).read(from_=StorageType.AZUREBLOB)
-        patch = await Flatfile(contents_hash=patch_sha256).read(
+        patch = await Flatfile(container_name, contents_hash=patch_sha256).read(
             from_=StorageType.AZUREBLOB
         )
 
@@ -871,6 +889,8 @@ class TestTestGP:
                 vds,
                 gp,
                 False,
+                container_name,
+                container_sas,
             )
 
         fail = auditor.get_events(EventType.GP_SUBMISSION_FAIL)

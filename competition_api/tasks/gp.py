@@ -1,4 +1,3 @@
-# pylint: disable=too-many-return-statements
 import os
 from typing import Any
 
@@ -28,6 +27,8 @@ async def check_gp(
     vds: VulnerabilityDiscovery,
     gp: GeneratedPatch,
     duplicate: bool,
+    azure_container: str,
+    container_sas: str,
 ):
     auditor = get_auditor(cls=RedisAuditor, **audit_context)
     clear_contextvars()
@@ -37,14 +38,18 @@ async def check_gp(
 
     redis = Redis(**v.get("redis.kwargs"))
 
-    async with CPWorkspace(vds.cp_name, auditor, str(vds.team_id), redis) as workspace:
+    async with CPWorkspace(
+        vds.cp_name, auditor, str(vds.team_id), redis, azure_container, container_sas
+    ) as workspace:
         if duplicate:
             await auditor.emit(
                 EventType.DUPLICATE_GP_SUBMISSION_FOR_CPV_UUID,
             )
 
         # Verify patch only modifies allowed extensions
-        patchfile = Flatfile(contents_hash=gp.data_sha256)
+        patchfile = Flatfile(
+            azure_container, contents_hash=gp.data_sha256, container_sas=container_sas
+        )
         try:
             content = await patchfile.read(from_=StorageType.AZUREBLOB)
             if content is None:

@@ -36,26 +36,6 @@ services:
       test: nc 127.0.0.1 10000 -z
       interval: 1s
       retries: 30
-  createblobcontainer:
-    image: mcr.microsoft.com/azure-cli
-    command:
-      [
-        "az",
-        "storage",
-        "container",
-        "create",
-        "--account-key",
-        "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==",
-        "--account-name",
-        "devstoreaccount1",
-        "--blob-endpoint",
-        "http://azureblob:10000/devstoreaccount1",
-        "--name",
-        "resultblobs",
-      ]
-    depends_on:
-      azureblob:
-        condition: service_healthy
   capi_job_status:
     build:
       context: .
@@ -83,9 +63,7 @@ services:
         target: /etc/capi/config.yaml
     environment:
       - WEB_CONCURRENCY=$WEB_CONCURRENCY
-      - AIXCC_AZURE_ACCOUNT_URL=http://devstoreaccount1.azureblob:10000
       - AIXCC_AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azureblob:10000/devstoreaccount1;
-      - AIXCC_AZURE_BLOB_CONTAINER_NAME=resultblobs
       - AIXCC_CP_ROOT=/cp_root
       - AIXCC_DATABASE_HOST=postgres
       - AIXCC_DATABASE_NAME=capi
@@ -97,8 +75,8 @@ services:
       - path: ./env
         required: true
     depends_on:
-      createblobcontainer:
-        condition: service_completed_successfully
+      azureblob:
+        condition: service_healthy
   capi_worker:
     build:
       context: .
@@ -114,9 +92,6 @@ services:
       - MODE=worker
       - AIXCC_WORKER_ID=00000000-0000-0000-0000-000000000000
       - AIXCC_FLATFILE_DIR=/tmp
-      - AIXCC_AZURE_ACCOUNT_URL=http://devstoreaccount1.azureblob:10000
-      - AIXCC_AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azureblob:10000/devstoreaccount1;
-      - AIXCC_AZURE_BLOB_CONTAINER_NAME=resultblobs
       - AIXCC_CP_ROOT=/cp_root
       - AIXCC_REDIS_HOST=redis
       - DOCKER_HOST=tcp://dind:2375
@@ -136,9 +111,7 @@ services:
     environment:
       - MODE=background
       - WEB_CONCURRENCY=$WEB_CONCURRENCY
-      - AIXCC_AZURE_ACCOUNT_URL=http://devstoreaccount1.azureblob:10000
       - AIXCC_AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azureblob:10000/devstoreaccount1;
-      - AIXCC_AZURE_BLOB_CONTAINER_NAME=resultblobs
       - AIXCC_CP_ROOT=/cp_root
       - AIXCC_DATABASE_HOST=postgres
       - AIXCC_DATABASE_NAME=capi

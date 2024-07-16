@@ -45,7 +45,8 @@ async def process_vd_upload(
             vd_uuid=uuid.uuid4(),
         )
 
-    blob = Flatfile(contents=vds.pov.data)
+    azure_container = f"worker-{team_id}"
+    blob = Flatfile(azure_container, contents=vds.pov.data)
     await blob.write(to=StorageType.FILESYSTEM)  # for archival purposes
     await blob.write(to=StorageType.AZUREBLOB)
     bind_contextvars(vds_blob_size=len(vds.pov.data), vds_blob_sha256=blob.sha256)
@@ -124,6 +125,8 @@ async def process_vd_upload(
         get_contextvars(),
         db_row,
         duplicate,
+        azure_container,
+        blob.container_sas(),
         _job_id=job_id,
         _queue_name=queue_name,
     )

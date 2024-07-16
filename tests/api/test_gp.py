@@ -1,4 +1,3 @@
-# pylint: disable=too-many-arguments
 import base64
 from hashlib import sha256
 from unittest import mock

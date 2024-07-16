@@ -1,5 +1,3 @@
-# pylint: disable=too-many-return-statements
-
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -31,6 +29,8 @@ async def check_vds(
     log_context: dict[str, str],
     vds: VulnerabilityDiscovery,
     duplicate: bool,
+    azure_container: str,
+    container_sas: str,
 ):
     auditor = get_auditor(cls=RedisAuditor, **audit_context)
     clear_contextvars()
@@ -40,7 +40,9 @@ async def check_vds(
 
     redis = Redis(**v.get("redis.kwargs"))
 
-    async with CPWorkspace(vds.cp_name, auditor, str(vds.team_id), redis) as workspace:
+    async with CPWorkspace(
+        vds.cp_name, auditor, str(vds.team_id), redis, azure_container, container_sas
+    ) as workspace:
         # Validate sanitizer exists in project.yaml
         if (sanitizer_str := workspace.sanitizer(vds.pou_sanitizer)) is None:
             await auditor.emit(

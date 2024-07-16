@@ -43,7 +43,8 @@ async def process_gp_upload(
     # Create GP row
     row: dict[str, Any] = {}
 
-    patch = Flatfile(contents=gp.data.encode("utf8"))
+    azure_container = f"worker-{team_id}"
+    patch = Flatfile(azure_container, contents=gp.data.encode("utf8"))
     await patch.write(to=StorageType.FILESYSTEM)  # for archival purposes
     await patch.write(to=StorageType.AZUREBLOB)
     bind_contextvars(patch_size=len(gp.data), patch_sha256=patch.sha256)
@@ -140,6 +141,8 @@ async def process_gp_upload(
         vds,
         gp_row,
         duplicate,
+        azure_container,
+        patch.container_sas(),
         _job_id=job_id,
         _queue_name=queue_name,
     )

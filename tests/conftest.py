@@ -6,12 +6,14 @@ import base64
 import os
 import pathlib
 import tempfile
+from datetime import datetime, timedelta, timezone
 from types import MappingProxyType
 from unittest import mock
 from uuid import uuid4
 
 import pytest
-from azure.storage.blob import BlobServiceClient
+from azure.storage.blob import BlobServiceClient, generate_container_sas
+from azure.storage.blob._blob_service_client import parse_connection_str
 from fastapi.testclient import TestClient
 from git import Repo
 from pytest_docker_tools import container
@@ -144,8 +146,13 @@ db_container = container(  # pylint: disable=no-value-for-parameter
 )
 
 
+@pytest.fixture
+def container_name():
+    return "worker-00000000-0000-0000-0000-000000000000"
+
+
 @pytest.fixture(autouse=True)
-def azureblob_config(azurite_container):
+def azureblob(azurite_container, container_name):
     host, port = azurite_container.get_addr("10000/tcp")
     v.set(
         "azure.storage_connection_string",
@@ -160,11 +167,29 @@ def azureblob_config(azurite_container):
         v.get("azure.storage_connection_string")
     )
 
-    v.set("azure.blob_container_name", "pytest")
-    blobsvc.create_container(v.get("azure.blob_container_name"))
+    blobsvc.create_container(container_name)
     init_vyper()
-    yield
-    blobsvc.delete_container(v.get("azure.blob_container_name"))
+    yield blobsvc
+    blobsvc.delete_container(container_name)
+    for blobctr in blobsvc.list_containers():
+        blobsvc.delete_container(blobctr)
+
+
+@pytest.fixture
+def container_sas(container_name, azureblob):
+    _, _, components = parse_connection_str(
+        v.get("azure.storage_connection_string"), None, "blob"
+    )
+    if not isinstance(components, dict):
+        raise RuntimeError("Storage connection string was not a dict")
+
+    yield generate_container_sas(
+        account_name=azureblob.account_name,
+        container_name=container_name,
+        account_key=components["account_key"],
+        permission="rw",
+        expiry=datetime.now(timezone.utc) + timedelta(days=1),
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -250,8 +275,8 @@ async def _create_and_return(db, table, row):
 
 
 @pytest.fixture
-async def fake_vds_dict(creds, fake_cp):
-    blob = Flatfile(contents=b"fake\n")
+async def fake_vds_dict(creds, fake_cp, container_name):
+    blob = Flatfile(container_name, contents=b"fake\n")
     await blob.write(to=StorageType.AZUREBLOB)
 
     return MappingProxyType(
@@ -274,8 +299,8 @@ async def fake_vds(fake_vds_dict):
 
 
 @pytest.fixture
-async def fake_accepted_vds(fake_cp, creds):
-    blob = Flatfile(contents=b"fake\n")
+async def fake_accepted_vds(fake_cp, creds, container_name):
+    blob = Flatfile(container_name, contents=b"fake\n")
     await blob.write(to=StorageType.AZUREBLOB)
 
     row = {
@@ -293,8 +318,8 @@ async def fake_accepted_vds(fake_cp, creds):
 
 
 @pytest.fixture
-async def fake_gp_dict(fake_accepted_vds):
-    patch = Flatfile(contents=build_patch().encode("utf8"))
+async def fake_gp_dict(fake_accepted_vds, container_name):
+    patch = Flatfile(container_name, contents=build_patch().encode("utf8"))
     await patch.write(to=StorageType.AZUREBLOB)
     return MappingProxyType(
         {"data_sha256": patch.sha256, "cpv_uuid": fake_accepted_vds["cpv_uuid"]}

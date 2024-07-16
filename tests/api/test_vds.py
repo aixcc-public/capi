@@ -1,4 +1,4 @@
-# pylint: disable=too-many-arguments,unused-argument
+# pylint: disable=unused-argument
 
 import base64
 from hashlib import sha256
@@ -189,8 +189,8 @@ class TestVDS:
             }
         ],
     )
-    async def test_get(client, row, creds, auth_header):
-        blob = Flatfile(contents=b"fake\n")
+    async def test_get(client, row, creds, auth_header, container_name):
+        blob = Flatfile(container_name, contents=b"fake\n")
         await blob.write()
 
         row["pov_data_sha256"] = blob.sha256

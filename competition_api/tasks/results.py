@@ -35,6 +35,7 @@ class Result(BaseModel):
 
 
 class Archive(BaseModel):
+    azure_container: str
     filename: str
     sha256: str
 
@@ -99,7 +100,7 @@ class ResultReceiver:
         await LOGGER.ainfo(
             "Received archive %s -> %s", archive.sha256, archive.filename
         )
-        flatfile = Flatfile(contents_hash=archive.sha256)
+        flatfile = Flatfile(archive.azure_container, contents_hash=archive.sha256)
         archive_dir = Path(v.get("flatfile_dir")) / "output"
         os.makedirs(archive_dir, exist_ok=True)
 

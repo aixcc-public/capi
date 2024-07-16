@@ -49,13 +49,21 @@ async def run(func, *args, stdin=None, timeout=3600, **kwargs):
     return return_code, stdout, stderr
 
 
-class CPWorkspace(
-    contextlib.AbstractAsyncContextManager
-):  # pylint: disable=too-many-instance-attributes
-    def __init__(self, cp_name: str, auditor: Auditor, artifact_key: str, redis: Redis):
+class CPWorkspace(contextlib.AbstractAsyncContextManager):
+    def __init__(
+        self,
+        cp_name: str,
+        auditor: Auditor,
+        artifact_key: str,
+        redis: Redis,
+        azure_container: str,
+        container_sas: str,
+    ):
         cp = CPRegistry.instance().get(cp_name)
         if cp is None:
             raise ValueError(f"cp_name {cp_name} does not exist")
+        self.azure_container = azure_container
+        self.container_sas = container_sas
         self.redis = redis
         self.auditor = auditor
         self.artifact_key = artifact_key
@@ -138,7 +146,11 @@ class CPWorkspace(
                 filename = str(tarball.name)
 
             with open(filename, mode="rb") as file:
-                flatfile = Flatfile(contents=file.read())
+                flatfile = Flatfile(
+                    self.azure_container,
+                    contents=file.read(),
+                    container_sas=self.container_sas,
+                )
                 await flatfile.write(to=StorageType.AZUREBLOB)
 
                 common_kwargs = {
@@ -149,7 +161,9 @@ class CPWorkspace(
                     v.get("redis.channels.results"),
                     OutputMessage(
                         message_type=OutputType.ARCHIVE,
-                        content=Archive(**common_kwargs),
+                        content=Archive(
+                            **common_kwargs, azure_container=self.azure_container
+                        ),
                     ).model_dump_json(),
                 )
                 await auditor.emit(
@@ -210,7 +224,11 @@ class CPWorkspace(
                 )
 
             else:
-                patch = Flatfile(contents_hash=patch_sha256)
+                patch = Flatfile(
+                    self.azure_container,
+                    contents_hash=patch_sha256,
+                    container_sas=self.container_sas,
+                )
                 await patch.read(from_=StorageType.AZUREBLOB)
                 await patch.write(to=StorageType.FILESYSTEM)
                 return_code, _, _ = await run(
@@ -232,7 +250,11 @@ class CPWorkspace(
             return False
 
     async def check_sanitizers(self, blob_sha256: str, harness: str) -> set[str]:
-        blob = Flatfile(contents_hash=blob_sha256)
+        blob = Flatfile(
+            self.azure_container,
+            contents_hash=blob_sha256,
+            container_sas=self.container_sas,
+        )
         await blob.read(from_=StorageType.AZUREBLOB)
         await blob.write(to=StorageType.FILESYSTEM)
         await LOGGER.adebug(
