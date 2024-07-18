@@ -19,7 +19,7 @@ async def start(
     team_id: UUID = Depends(get_token_id),
     _: bool = Depends(has_admin_permissions),
 ):
-    auditor = get_auditor(team_id)
+    auditor = get_auditor(team_id=team_id)
     await auditor.emit(EventType.COMPETITION_START, timestamp=event.timestamp)
     return {"message": "Created competition start event"}
 
@@ -30,6 +30,6 @@ async def stop(
     team_id: UUID = Depends(get_token_id),
     _: bool = Depends(has_admin_permissions),
 ):
-    auditor = get_auditor(team_id)
+    auditor = get_auditor(team_id=team_id)
     await auditor.emit(EventType.COMPETITION_STOP, timestamp=event.timestamp)
     return {"message": "Created competition stop event"}
