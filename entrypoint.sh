@@ -41,6 +41,7 @@ elif [[ "${MODE}" = "monitor" ]]; then
 		sleep $((AIXCC_WORKER_HEALTH_CHECK_INTERVAL * 3 / 2))
 	done
 elif [[ "${MODE}" = "background" ]]; then
+	$BASH -c "poetry run wait-for-redis"
 	$BASH -c "poetry run background"
 else
 	$BASH -c "cd competition_api && poetry run alembic upgrade head && cd -"
