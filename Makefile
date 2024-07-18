@@ -62,11 +62,13 @@ jenkins-cp: local-volumes
 	rm -rf $(HOST_CP_ROOT_DIR)/$@
 	git clone git@github.com:aixcc-sc/challenge-002-jenkins-cp.git $(HOST_CP_ROOT_DIR)/$@
 	cd $(HOST_CP_ROOT_DIR)/$@ && make cpsrc-prepare
+	cd $(HOST_CP_ROOT_DIR)/$@ && docker pull $$(yq .docker_image project.yaml) && docker image save $$(yq .docker_image project.yaml) >img-jenkins.tar.gz
 
 mock-cp: local-volumes
 	rm -rf $(HOST_CP_ROOT_DIR)/$@
 	git clone git@github.com:aixcc-sc/mock-cp.git $(HOST_CP_ROOT_DIR)/$@
 	cd $(HOST_CP_ROOT_DIR)/$@ && make cpsrc-prepare
+	cd $(HOST_CP_ROOT_DIR)/$@ && docker pull $$(yq .docker_image project.yaml) && docker image save $$(yq .docker_image project.yaml) >img-mock-cp.tar.gz
 
 clean-volumes:
 	rm -rf $(VOLUMES)

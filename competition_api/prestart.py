@@ -1,5 +1,8 @@
 import asyncio
+import os
 
+import redis
+from environs import Env
 from sqlalchemy_dlock.asyncio import create_async_sadlock
 from structlog.stdlib import get_logger
 from vyper import v
@@ -25,7 +28,48 @@ async def auth_preload():
                 await Token.upsert(db, **kwargs)
 
 
+async def create_worker_redis_creds():
+    r = redis.Redis(**v.get("redis.kwargs"))
+
+    while True:
+        try:
+            await LOGGER.ainfo("Waiting for redis")
+            r.ping()
+            break
+        except redis.exceptions.ConnectionError:
+            await asyncio.sleep(5)
+
+    for worker in v.get("workers"):
+        path = os.path.join("/etc/capi/workers", f"{worker}.env")
+        if not os.path.isfile(path):
+            LOGGER.error("Missing worker config for %s", worker)
+
+        env = Env()
+        env.read_env(path, recurse=False)
+
+        redis_user = env("AIXCC_REDIS_USERNAME")
+        redis_pass = env("AIXCC_REDIS_PASSWORD")
+
+        await LOGGER.ainfo("Creating redis creds for %s: user %s", worker, redis_user)
+        r.execute_command(
+            "ACL SETUSER "
+            f"{redis_user} >{redis_pass} on "
+            f"+@read ~arq:*{worker}* "
+            f"+@write ~arq:*{worker}* "
+            "+@write ~arq:abort "
+            "+publish ~channel:audit "
+            "+publish ~channel:results "
+            "+@transaction +@connection +info"
+        )
+
+
+async def prestart():
+    async with asyncio.TaskGroup() as tg:
+        tg.create_task(auth_preload())
+        tg.create_task(create_worker_redis_creds())
+
+
 def main():
     init_vyper()
     v.set_default("auth.preload", {})
-    asyncio.run(auth_preload())
+    asyncio.run(prestart())

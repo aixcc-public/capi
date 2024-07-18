@@ -33,6 +33,7 @@ if [[ "${MODE}" = "worker" ]]; then
 		echo "Loading CP container: $IMAGE_FILE"
 		docker load -i "$IMAGE_FILE"
 	done
+	$BASH -c "poetry run wait-for-redis"
 	$BASH -c "poetry run arq competition_api.tasks.Worker"
 elif [[ "${MODE}" = "monitor" ]]; then
 	while true; do

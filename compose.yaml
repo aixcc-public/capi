@@ -19,33 +19,6 @@ services:
       test: redis-cli ping
       interval: 1s
       retries: 30
-  create-worker-redis-user:
-    image: redis:6
-    command:
-      - redis-cli
-      - -h
-      - redis
-      - ACL
-      - SETUSER
-      - worker-00000000-0000-0000-0000-000000000000
-      - ">secret"
-      - on
-      - +@read
-      - "~arq:*00000000-0000-0000-0000-000000000000*"
-      - +@write
-      - "~arq:*00000000-0000-0000-0000-000000000000*"
-      - +@write
-      - "~arq:abort"
-      - +publish
-      - "~channel:audit"
-      - +publish
-      - "~channel:results"
-      - +@transaction
-      - +@connection
-      - +info
-    depends_on:
-      redis:
-        condition: service_healthy
   postgres:
     image: "postgres:16"
     # this makes postgres log queries
@@ -67,18 +40,6 @@ services:
       test: nc 127.0.0.1 10000 -z
       interval: 1s
       retries: 30
-  capi_job_status:
-    build:
-      context: .
-    tty: true
-    restart: always
-    configs:
-      - source: capi
-        target: /etc/capi/config.yaml
-    environment:
-      - MODE=monitor
-      - AIXCC_REDIS_HOST=redis
-      - AIXCC_WORKER_HEALTH_CHECK_INTERVAL=30
   capi:
     build:
       context: .
@@ -92,6 +53,8 @@ services:
     configs:
       - source: capi
         target: /etc/capi/config.yaml
+      - source: worker
+        target: /etc/capi/workers/00000000-0000-0000-0000-000000000000.env
     environment:
       - WEB_CONCURRENCY=$WEB_CONCURRENCY
       - AIXCC_AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azureblob:10000/devstoreaccount1;
@@ -125,15 +88,12 @@ services:
       - AIXCC_FLATFILE_DIR=/tmp
       - AIXCC_CP_ROOT=/cp_root
       - AIXCC_REDIS_HOST=redis
-      - AIXCC_REDIS_USERNAME=worker-00000000-0000-0000-0000-000000000000
-      - AIXCC_REDIS_PASSWORD=secret
       - DOCKER_HOST=tcp://dind:2375
     env_file:
       - path: ./env
         required: true
-    depends_on:
-      create-worker-redis-user:
-        condition: service_completed_successfully
+      - path: ./worker.env
+        required: true
   capi_background:
     build:
       context: .
@@ -176,3 +136,5 @@ volumes:
 configs:
   capi:
     file: ./standard_config.yaml
+  worker:
+    file: ./worker.env

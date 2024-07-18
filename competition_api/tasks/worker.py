@@ -1,3 +1,6 @@
+from time import sleep
+
+import redis
 from arq.connections import RedisSettings
 from structlog.stdlib import get_logger
 from vyper import v
@@ -14,6 +17,18 @@ init_vyper()
 v.set_default("worker.health_check_interval", 30)
 v.set_default("worker.max_concurrent_jobs", 50)
 v.set_default("worker.id", "default")
+
+
+def wait_for_redis():
+    r = redis.Redis(**v.get("redis.kwargs"))
+
+    while True:
+        try:
+            r.ping()
+            break
+        except redis.exceptions.ConnectionError:
+            LOGGER.info("Waiting for redis")
+            sleep(5)
 
 
 class Worker:
