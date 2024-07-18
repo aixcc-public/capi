@@ -112,7 +112,7 @@ async def process_vd_upload(
     duplicate = submissions_for_commit is not None and submissions_for_commit[0] > 0
 
     # pylint: disable=duplicate-code
-    job_id = "{capijobs}" + f"check-vds-{db_row.id}"
+    job_id = "{capijobs}" + f"{team_id}-check-vds-{db_row.id}"
     queue_name = get_queue_name(
         str(team_id) if str(team_id) in v.get("workers") else "default"
     )

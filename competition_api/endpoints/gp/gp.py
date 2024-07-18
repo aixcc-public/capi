@@ -127,7 +127,7 @@ async def process_gp_upload(
     duplicate = submissions_for_cpv_uuid is not None and submissions_for_cpv_uuid[0] > 0
 
     # pylint: disable=duplicate-code
-    job_id = "{capijobs}" + f"check-gp-{gp_row.id}"
+    job_id = "{capijobs}" + f"{team_id}-check-gp-{gp_row.id}"
     queue_name = get_queue_name(
         str(team_id) if str(team_id) in v.get("workers") else "default"
     )

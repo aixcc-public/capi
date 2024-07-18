@@ -16,6 +16,7 @@ def generate_config():
     v.set(
         "redis.kwargs",
         {
+            "username": v.get("redis.username"),
             "host": v.get("redis.host"),
             "port": v.get_int("redis.port"),
             "password": v.get("redis.password"),
