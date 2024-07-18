@@ -42,7 +42,7 @@ async def create_worker_redis_creds():
     for worker in v.get("workers"):
         path = os.path.join("/etc/capi/workers", f"{worker}.env")
         if not os.path.isfile(path):
-            LOGGER.error("Missing worker config for %s", worker)
+            raise RuntimeError(f"Missing worker config for {worker}")
 
         env = Env()
         env.read_env(path, recurse=False)
