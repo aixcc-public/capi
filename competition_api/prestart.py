@@ -2,7 +2,6 @@ import asyncio
 import os
 
 import redis
-from environs import Env
 from sqlalchemy_dlock.asyncio import create_async_sadlock
 from structlog.stdlib import get_logger
 from vyper import v
@@ -44,11 +43,17 @@ async def create_worker_redis_creds():
         if not os.path.isfile(path):
             raise RuntimeError(f"Missing worker config for {worker}")
 
-        env = Env()
-        env.read_env(path, recurse=False)
+        envs: dict[str, str] = {}
+        with open(path, "r", encoding="utf8") as envfile:
+            for line in envfile:
+                key, val = line.split("=")
+                envs[key] = val
 
-        redis_user = env("AIXCC_REDIS_USERNAME")
-        redis_pass = env("AIXCC_REDIS_PASSWORD")
+        redis_user = envs.get("AIXCC_REDIS_USERNAME")
+        redis_pass = envs.get("AIXCC_REDIS_PASSWORD")
+
+        if not all([redis_user, redis_pass]):
+            raise RuntimeError(f"Not all worker config is set for {worker}")
 
         await LOGGER.ainfo("Creating redis creds for %s: user %s", worker, redis_user)
         r.execute_command(

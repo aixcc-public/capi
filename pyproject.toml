@@ -41,7 +41,6 @@ whatthepatch = "^1.0.5"
 azure-storage-blob = "^12.20.0"
 azure-identity = "^1.17.1"
 types-redis = "^4.6.0.20240425"
-environs = "^11.0.0"
 [tool.poetry.group.dev.dependencies]
 bandit = ">=1.7.8"
 black = ">=24.4.2"
