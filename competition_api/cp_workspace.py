@@ -93,17 +93,6 @@ class CPWorkspace(contextlib.AbstractAsyncContextManager):
             self.run_env["DOCKER_EXTRA_ARGS"] = f"-v {internal_dir}:/.internal_only"
 
         await LOGGER.adebug("Workspace: setup")
-        await run(
-            "docker",
-            "login",
-            "ghcr.io",
-            "-u",
-            os.environ.get("GITHUB_USER", ""),
-            "--password-stdin",
-            stdin=os.environ.get("GITHUB_TOKEN", ""),
-        )
-        await run("docker", "pull", self.project_yaml["docker_image"])
-
         return self
 
     async def __aexit__(self, _exc_type, _exc, _tb):

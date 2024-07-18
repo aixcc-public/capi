@@ -23,6 +23,16 @@ fi
 MODE=${MODE:-api}
 
 if [[ "${MODE}" = "worker" ]]; then
+	until docker version >/dev/null 2>/dev/null; do
+		echo "Waiting for Docker daemon to start"
+		sleep 5
+	done
+	IMAGE_FILES=$(find "${AIXCC_CP_ROOT}" -type f -name "img-*.tar.gz")
+	echo "Loading CP images from local files"
+	for IMAGE_FILE in $IMAGE_FILES; do
+		echo "Loading CP container: $IMAGE_FILE"
+		docker load -i "$IMAGE_FILE"
+	done
 	$BASH -c "poetry run arq competition_api.tasks.Worker"
 elif [[ "${MODE}" = "monitor" ]]; then
 	while true; do
