@@ -59,12 +59,11 @@ async def create_worker_redis_creds():
         r.execute_command(
             "ACL SETUSER "
             f"{redis_user} >{redis_pass} on "
-            f"+@read ~arq:*{worker}* "
-            f"+@write ~arq:*{worker}* "
-            "+@write ~arq:abort "
-            "+publish ~channel:audit "
-            "+publish ~channel:results "
-            "+@transaction +@connection +info"
+            # Note that read & write apply to keys (~) and publish applies to channels (&)
+            # so the shared resources are still write-only for workers
+            "-@all +@read +@write +publish +@transaction +@connection +info "
+            "resetchannels resetkeys "
+            f"~arq:*{worker}* ~arq:abort &channel:audit &channel:results"
         )
 
 
