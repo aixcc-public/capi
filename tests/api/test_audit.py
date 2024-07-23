@@ -12,6 +12,8 @@ class TestAudit:
         "url,event,admin,authenticated",
         [
             ("/audit/start/", EventType.COMPETITION_START, True, True),
+            ("/audit/start/?official=true", EventType.COMPETITION_START, True, True),
+            ("/audit/start/?official=false", EventType.COMPETITION_START, True, True),
             ("/audit/stop/", EventType.COMPETITION_STOP, True, True),
             ("/audit/start/", EventType.COMPETITION_START, False, True),
             ("/audit/stop/", EventType.COMPETITION_STOP, False, True),
@@ -52,6 +54,12 @@ class TestAudit:
             audit_event = audit_event[0]
 
             assert audit_event.timestamp == timestamp
+
+            if event == EventType.COMPETITION_START:
+                if "official=true" in url:
+                    assert audit_event.official
+                else:
+                    assert not audit_event.official
         elif authenticated:
             assert resp.status_code == 403
             assert not auditor.events

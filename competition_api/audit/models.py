@@ -21,6 +21,7 @@ class CompetitionStartEvent(BaseModel):
     """The competition has officially begun, at this timestamp."""
 
     timestamp: datetime
+    official: bool
 
 
 class CompetitionStopEvent(BaseModel):

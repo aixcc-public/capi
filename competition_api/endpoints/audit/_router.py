@@ -16,12 +16,18 @@ LOGGER = get_logger(__name__)
 @router.post("/audit/start/")
 async def start(
     event: TimestampInput,
+    official: str = "false",
     team_id: UUID = Depends(get_token_id),
     _: bool = Depends(has_admin_permissions),
 ):
+    official_bool = official.lower() in ["t", "true", "1", "yes", "y"]
     auditor = get_auditor(team_id=team_id)
-    await auditor.emit(EventType.COMPETITION_START, timestamp=event.timestamp)
-    return {"message": "Created competition start event"}
+    await auditor.emit(
+        EventType.COMPETITION_START,
+        timestamp=event.timestamp,
+        official=official_bool,
+    )
+    return {"message": "Created competition start event", "official": official_bool}
 
 
 @router.post("/audit/stop/")
