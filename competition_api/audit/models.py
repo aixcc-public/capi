@@ -51,6 +51,10 @@ class CPOutputArchived(BaseModel):
     cp_name: str
     command: str
 
+    vd_uuid: UUID | None = None
+    gp_uuid: UUID | None = None
+    cpv_uuid: UUID | None = None
+
 
 class MockResponseEvent(BaseModel):
     """Emitted if the cAPI is operating in mock mode."""
