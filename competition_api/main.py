@@ -38,8 +38,7 @@ async def lifespan(_app: FastAPI):
     setup_logging()
 
     if not v.get_bool("mock_mode"):
-        # initialize cp registry
-        CPRegistry.instance()
+        await CPRegistry.instance().load_from_disk()
 
     await LOGGER.ainfo("Starting up with workers %s", v.get("workers"))
 

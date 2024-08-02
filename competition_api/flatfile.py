@@ -8,14 +8,9 @@ from uuid import uuid4
 
 import azure
 from aiofile import async_open
-from azure.storage.blob import (
-    BlobClient,
-    BlobServiceClient,
-    ContainerClient,
-    ContainerSasPermissions,
-    generate_container_sas,
-)
+from azure.storage.blob import ContainerSasPermissions, generate_container_sas
 from azure.storage.blob._blob_service_client import parse_connection_str
+from azure.storage.blob.aio import BlobServiceClient, ContainerClient
 from structlog.stdlib import get_logger
 from vyper import v
 
@@ -39,29 +34,9 @@ class Flatfile:
     ):
         self.directory = Path(v.get("flatfile_dir"))
         self._contents = contents
-        self._blobsvc: BlobServiceClient | None = None
         self._azure_container = azure_container
         self._container_sas = container_sas
         self._account_key: str | None = None
-
-        if v.get("azure.storage_connection_string"):
-            blobsvc = BlobServiceClient.from_connection_string(
-                v.get("azure.storage_connection_string")
-            )
-            _, _, _components = parse_connection_str(
-                v.get("azure.storage_connection_string"), None, "blob"
-            )
-            if not isinstance(_components, dict):
-                raise RuntimeError("Storage connection string was not a dict")
-            self._account_key = _components["account_key"]
-
-            try:
-                blobsvc.create_container(azure_container)
-                LOGGER.info("Created azure blob container %s", azure_container)
-            except azure.core.exceptions.ResourceExistsError:
-                LOGGER.info("Azure blob container %s already existed", azure_container)
-
-            self._blobsvc = blobsvc
 
         if self._contents:
             self.sha256 = sha256(self._contents).hexdigest()
@@ -72,35 +47,62 @@ class Flatfile:
 
         self.filename = self.directory / self.sha256
 
-    def container_sas(self) -> str:
-        if self._blobsvc is None or self._account_key is None:
+    async def container_sas(self) -> str:
+        if not v.get("azure.storage_connection_string") or self._account_key is None:
             raise RuntimeError(
                 "Tried to create a container SAS without elevated permissions"
             )
 
-        container_client = self._blobsvc.get_container_client(
+        async with BlobServiceClient.from_connection_string(
+            v.get("azure.storage_connection_string")
+        ) as blobsvc, blobsvc.get_container_client(
             container=self._azure_container
-        )
-        sas_token = generate_container_sas(
-            account_name=self._blobsvc.account_name,
-            container_name=self._azure_container,
-            account_key=self._account_key,
-            permission=ContainerSasPermissions(read=True, write=True, create=True),
-            expiry=datetime.now(timezone.utc) + timedelta(hours=2),
-        )
-
-        return f"{container_client.url}?{sas_token}"
-
-    def _blob_client(self) -> BlobClient:
-        if self._blobsvc is not None:
-            return self._blobsvc.get_blob_client(
-                container=self._azure_container, blob=self.sha256
+        ) as container_client:
+            sas_token = generate_container_sas(
+                account_name=blobsvc.account_name,
+                container_name=self._azure_container,
+                account_key=self._account_key,
+                permission=ContainerSasPermissions(read=True, write=True, create=True),
+                expiry=datetime.now(timezone.utc) + timedelta(hours=2),
             )
-        if self._container_sas is not None:
-            return ContainerClient.from_container_url(
+
+            return f"{container_client.url}?{sas_token}"
+
+    @contextlib.asynccontextmanager
+    async def _blob_client(self):
+        if v.get("azure.storage_connection_string"):
+            async with BlobServiceClient.from_connection_string(
+                v.get("azure.storage_connection_string")
+            ) as blobsvc:
+                _, _, _components = parse_connection_str(
+                    v.get("azure.storage_connection_string"), None, "blob"
+                )
+                if not isinstance(_components, dict):
+                    raise RuntimeError("Storage connection string was not a dict")
+                self._account_key = _components["account_key"]
+
+                try:
+                    await blobsvc.create_container(self._azure_container)
+                    await LOGGER.ainfo(
+                        "Created azure blob container %s", self._azure_container
+                    )
+                except azure.core.exceptions.ResourceExistsError:
+                    await LOGGER.ainfo(
+                        "Azure blob container %s already existed", self._azure_container
+                    )
+                async with blobsvc.get_blob_client(
+                    container=self._azure_container, blob=self.sha256
+                ) as blobclient:
+                    yield blobclient
+
+        elif self._container_sas is not None:
+            async with ContainerClient.from_container_url(
                 self._container_sas
-            ).get_blob_client(self.sha256)
-        raise RuntimeError("Tried to create a Flatfile without Azure Blob access")
+            ).get_blob_client(self.sha256) as blobclient:
+                yield blobclient
+
+        else:
+            raise RuntimeError("Tried to create a Flatfile without Azure Blob access")
 
     async def write(self, to: StorageType = StorageType.FILESYSTEM):
         if self._contents is None:
@@ -120,7 +122,8 @@ class Flatfile:
                 self.sha256,
             )
             try:
-                self._blob_client().upload_blob(self._contents)
+                async with self._blob_client() as blobclient:
+                    await blobclient.upload_blob(self._contents)
             except azure.core.exceptions.ResourceExistsError:
                 await LOGGER.awarning("Blob with hash %s already exists", self.sha256)
 
@@ -135,7 +138,8 @@ class Flatfile:
                 self._azure_container,
                 self.sha256,
             )
-            self._contents = self._blob_client().download_blob().readall()
+            async with self._blob_client() as blobclient:
+                self._contents = await (await blobclient.download_blob()).readall()
         if self._contents is None:
             raise RuntimeError("No content found for file")
         return self._contents

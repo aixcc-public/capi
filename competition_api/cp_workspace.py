@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from aiofile import async_open
 from git import Repo
 from redis.asyncio import Redis
 from structlog.stdlib import get_logger
@@ -134,10 +135,10 @@ class CPWorkspace(contextlib.AbstractAsyncContextManager):
                 tarball.add(path, arcname=path.name)
                 filename = str(tarball.name)
 
-            with open(filename, mode="rb") as file:
+            async with async_open(filename, mode="rb") as file:
                 flatfile = Flatfile(
                     self.azure_container,
-                    contents=file.read(),
+                    contents=await file.read(),
                     container_sas=self.container_sas,
                 )
                 await flatfile.write(to=StorageType.AZUREBLOB)
@@ -284,8 +285,8 @@ class CPWorkspace(contextlib.AbstractAsyncContextManager):
                 pov_output_path / "stdout.log",
             ]:
                 try:
-                    with open(file, "r", encoding="utf8") as f:
-                        for line in f:
+                    async with async_open(file, "r", encoding="utf8") as f:
+                        async for line in f:
                             for key, sanitizer in self.project_yaml[
                                 "sanitizers"
                             ].items():

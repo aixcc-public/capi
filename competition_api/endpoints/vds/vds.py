@@ -126,7 +126,7 @@ async def process_vd_upload(
         db_row,
         duplicate,
         azure_container,
-        blob.container_sas(),
+        await blob.container_sas(),
         _job_id=job_id,
         _queue_name=queue_name,
     )

@@ -7,6 +7,7 @@ from threading import RLock
 from typing import Any
 
 import git
+from aiofile import async_open
 from ruamel.yaml import YAML as RuamelYaml
 from structlog.stdlib import get_logger
 from vyper import v
@@ -99,46 +100,44 @@ class CPRegistry:
     def __init__(self):
         self._registry: dict[str, CP] = {}
 
-        if self._registry:
-            return
-
-        self._load_from_disk()
-
-    def _load_from_disk(self):
+    async def load_from_disk(self):
         with CPRegistry._lock:
             cp_root = v.get("cp_root")
 
-            if not cp_root:
-                LOGGER.warning(
-                    "Bailing on initializing CPRegistry because cp_root was None"
+            if not cp_root or not os.path.isdir(cp_root):
+                await LOGGER.awarning(
+                    "Not initializing CPRegistry because cp_root was %s",
+                    "not a directory" if cp_root else "none",
                 )
                 return
 
             for item in os.listdir(cp_root):
                 item = pathlib.Path(cp_root) / item
                 if os.path.isdir(item) and os.path.isfile(item / "project.yaml"):
-                    project_yaml = YAML.load(item / "project.yaml")
-                    if not (name := project_yaml.get("cp_name")):
-                        LOGGER.warning(
-                            "project.yaml in %s missing cp_name key. Skipping it.", item
-                        )
-                        continue
-                    cp = CP(name, item, project_yaml)
-                    if not cp.sources:
-                        LOGGER.warning(
-                            "project.yaml in %s has no sources.  Skipping it.", item
-                        )
-                        continue
-                    self._registry[name] = cp
+                    async with async_open(item / "project.yaml") as yamlfile:
+                        project_yaml = YAML.load(await yamlfile.read())
+                        if not (name := project_yaml.get("cp_name")):
+                            await LOGGER.awarning(
+                                "project.yaml in %s missing cp_name key. Skipping it.",
+                                item,
+                            )
+                            continue
+                        cp = CP(name, item, project_yaml)
+                        if not cp.sources:
+                            await LOGGER.awarning(
+                                "project.yaml in %s has no sources.  Skipping it.", item
+                            )
+                            continue
+                        self._registry[name] = cp
 
-                    has_internal = os.path.isdir(item / ".internal_only")
-                    LOGGER.info(
-                        "Loaded cp %s%s",
-                        name,
-                        " with internal folder" if has_internal else "",
-                    )
+                        has_internal = os.path.isdir(item / ".internal_only")
+                        await LOGGER.ainfo(
+                            "Loaded cp %s%s",
+                            name,
+                            " with internal folder" if has_internal else "",
+                        )
                 else:
-                    LOGGER.info(
+                    await LOGGER.ainfo(
                         "Item %s in %s does not look like a challenge problem",
                         item,
                         v.get("cp_root"),

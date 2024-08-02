@@ -33,15 +33,13 @@ if [[ "${MODE}" = "worker" ]]; then
 		echo "Loading CP container: $IMAGE_FILE"
 		docker load -i "$IMAGE_FILE"
 	done
-	$BASH -c "poetry run wait-for-redis"
-	$BASH -c "poetry run arq competition_api.tasks.Worker"
+	$BASH -c "poetry run arq competition_api.tasks.worker.Worker"
 elif [[ "${MODE}" = "monitor" ]]; then
 	while true; do
-		$BASH -c "poetry run arq --check competition_api.tasks.Worker" || echo "Initial health status pending"
+		$BASH -c "poetry run arq --check competition_api.tasks.worker.Worker" || echo "Initial health status pending"
 		sleep $((AIXCC_WORKER_HEALTH_CHECK_INTERVAL * 3 / 2))
 	done
 elif [[ "${MODE}" = "background" ]]; then
-	$BASH -c "poetry run wait-for-redis"
 	$BASH -c "poetry run background"
 else
 	$BASH -c "cd competition_api && poetry run alembic upgrade head && cd -"

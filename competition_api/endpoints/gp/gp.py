@@ -142,7 +142,7 @@ async def process_gp_upload(
         gp_row,
         duplicate,
         azure_container,
-        patch.container_sas(),
+        await patch.container_sas(),
         _job_id=job_id,
         _queue_name=queue_name,
     )

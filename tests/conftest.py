@@ -12,8 +12,9 @@ from unittest import mock
 from uuid import uuid4
 
 import pytest
-from azure.storage.blob import BlobServiceClient, generate_container_sas
+from azure.storage.blob import generate_container_sas
 from azure.storage.blob._blob_service_client import parse_connection_str
+from azure.storage.blob.aio import BlobServiceClient
 from fastapi.testclient import TestClient
 from git import Repo
 from pytest_docker_tools import container
@@ -110,8 +111,8 @@ def repo(cp_root, test_project_yaml):
 
 
 @pytest.fixture(autouse=True)
-def rebuild_cp_registry(repo):
-    cp_registry.CPRegistry.instance()._load_from_disk()  # pylint: disable=protected-access
+async def rebuild_cp_registry(repo):
+    await cp_registry.CPRegistry.instance().load_from_disk()  # pylint: disable=protected-access
 
 
 @pytest.fixture
@@ -152,7 +153,7 @@ def container_name():
 
 
 @pytest.fixture(autouse=True)
-def azureblob(azurite_container, container_name):
+async def azureblob(azurite_container, container_name):
     host, port = azurite_container.get_addr("10000/tcp")
     v.set(
         "azure.storage_connection_string",
@@ -163,16 +164,17 @@ def azureblob(azurite_container, container_name):
         ),
     )
 
-    blobsvc = BlobServiceClient.from_connection_string(
+    async with BlobServiceClient.from_connection_string(
         v.get("azure.storage_connection_string")
-    )
+    ) as blobsvc:
+        await blobsvc.create_container(container_name)
+        init_vyper()
 
-    blobsvc.create_container(container_name)
-    init_vyper()
-    yield blobsvc
-    blobsvc.delete_container(container_name)
-    for blobctr in blobsvc.list_containers():
-        blobsvc.delete_container(blobctr)
+        yield blobsvc
+
+        await blobsvc.delete_container(container_name)
+        async for blobctr in blobsvc.list_containers():
+            await blobsvc.delete_container(blobctr)
 
 
 @pytest.fixture

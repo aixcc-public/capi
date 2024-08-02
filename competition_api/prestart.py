@@ -1,7 +1,9 @@
 import asyncio
 import os
+from typing import cast
 
 import redis
+from aiofile import async_open
 from sqlalchemy_dlock.asyncio import create_async_sadlock
 from structlog.stdlib import get_logger
 from vyper import v
@@ -44,8 +46,10 @@ async def create_worker_redis_creds():
             raise RuntimeError(f"Missing worker config for {worker}")
 
         envs: dict[str, str] = {}
-        with open(path, "r", encoding="utf8") as envfile:
-            for line in envfile:
+        async with async_open(path, "r", encoding="utf8") as envfile:
+            async for line in envfile:
+                # this is always a string, but the types on async_open aren't defined that tightly
+                line = cast(str, line)
                 key, val = line.split("=")
                 envs[key] = val
 
